@@ -104,19 +104,42 @@ export default function MateriePrime() {
           {groups.map((g) => (
             <Card
               key={g.id}
-              className="card-elevated cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => setSelected(g)}
+              className="card-elevated group relative hover:shadow-md transition-shadow"
               data-testid={`raw-group-${g.name}`}
             >
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: "#6B1D2F14", color: "#6B1D2F" }}>
-                    <Package2 className="w-5 h-5" />
+              <button
+                type="button"
+                className="absolute top-3 right-3 w-8 h-8 rounded-md border border-stone-200 bg-white/80 hover:bg-red-50 hover:border-red-300 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    const items = await api.get("/raw-items", { params: { group_id: g.id } });
+                    const cnt = items.data.length;
+                    const msg = cnt > 0
+                      ? `Il macrogruppo "${g.name}" contiene ${cnt} articoli. Eliminare TUTTO (gruppo + articoli)?`
+                      : `Eliminare il macrogruppo "${g.name}"?`;
+                    if (!window.confirm(msg)) return;
+                    await api.delete(`/groups/${g.id}`, { params: { cascade: cnt > 0 } });
+                    toast.success("Macrogruppo eliminato");
+                    loadGroups();
+                  } catch (err) { toast.error(formatApiError(err)); }
+                }}
+                data-testid={`del-raw-group-${g.name}`}
+                title="Elimina macrogruppo"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+              <div className="cursor-pointer" onClick={() => setSelected(g)}>
+                <CardContent className="p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: "#6B1D2F14", color: "#6B1D2F" }}>
+                      <Package2 className="w-5 h-5" />
+                    </div>
                   </div>
-                </div>
-                <div className="font-serif-display text-xl text-stone-900">{g.name}</div>
-                <div className="text-xs text-stone-500 mt-1">{g.description || "—"}</div>
-              </CardContent>
+                  <div className="font-serif-display text-xl text-stone-900">{g.name}</div>
+                  <div className="text-xs text-stone-500 mt-1">{g.description || "—"}</div>
+                </CardContent>
+              </div>
             </Card>
           ))}
           {groups.length === 0 && <div className="text-stone-500 col-span-full">Nessun macrogruppo. Creane uno per iniziare.</div>}

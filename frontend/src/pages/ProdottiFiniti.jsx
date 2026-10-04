@@ -100,19 +100,38 @@ export default function ProdottiFiniti() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {groups.map((g) => (
-            <Card
-              key={g.id}
-              className="card-elevated cursor-pointer hover:shadow-md"
-              onClick={() => setSelected(g)}
-              data-testid={`fin-group-${g.name}`}
-            >
-              <CardContent className="p-5">
-                <div className="w-10 h-10 rounded-md flex items-center justify-center mb-3" style={{ background: "#B4530914", color: "#B45309" }}>
-                  <Wine className="w-5 h-5" />
-                </div>
-                <div className="font-serif-display text-xl text-stone-900">{g.name}</div>
-                <div className="text-xs text-stone-500 mt-1">{g.description || "—"}</div>
-              </CardContent>
+            <Card key={g.id} className="card-elevated group relative hover:shadow-md transition-shadow" data-testid={`fin-group-${g.name}`}>
+              <button
+                type="button"
+                className="absolute top-3 right-3 w-8 h-8 rounded-md border border-stone-200 bg-white/80 hover:bg-red-50 hover:border-red-300 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    const items = await api.get("/finished-items", { params: { group_id: g.id } });
+                    const cnt = items.data.length;
+                    const msg = cnt > 0
+                      ? `Il macrogruppo "${g.name}" contiene ${cnt} lotti. Eliminare TUTTO (gruppo + lotti)?`
+                      : `Eliminare il macrogruppo "${g.name}"?`;
+                    if (!window.confirm(msg)) return;
+                    await api.delete(`/groups/${g.id}`, { params: { cascade: cnt > 0 } });
+                    toast.success("Macrogruppo eliminato");
+                    loadGroups();
+                  } catch (err) { toast.error(formatApiError(err)); }
+                }}
+                data-testid={`del-fin-group-${g.name}`}
+                title="Elimina macrogruppo"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+              <div className="cursor-pointer" onClick={() => setSelected(g)}>
+                <CardContent className="p-5">
+                  <div className="w-10 h-10 rounded-md flex items-center justify-center mb-3" style={{ background: "#B4530914", color: "#B45309" }}>
+                    <Wine className="w-5 h-5" />
+                  </div>
+                  <div className="font-serif-display text-xl text-stone-900">{g.name}</div>
+                  <div className="text-xs text-stone-500 mt-1">{g.description || "—"}</div>
+                </CardContent>
+              </div>
             </Card>
           ))}
           {groups.length === 0 && <div className="text-stone-500 col-span-full">Nessun macrogruppo.</div>}

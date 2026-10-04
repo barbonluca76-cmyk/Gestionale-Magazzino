@@ -288,16 +288,20 @@ async def create_group(data: GroupIn, user: dict = Depends(get_current_user)):
     return doc
 
 @api.delete("/groups/{gid}")
-async def delete_group(gid: str, user: dict = Depends(get_current_user)):
+async def delete_group(gid: str, cascade: bool = False, user: dict = Depends(get_current_user)):
     g = await db.groups.find_one({"_id": oid(gid)})
     if not g:
         raise HTTPException(status_code=404, detail="Gruppo non trovato")
     coll = "raw_items" if g["kind"] == "raw" else "finished_items"
     cnt = await db[coll].count_documents({"group_id": gid})
-    if cnt:
-        raise HTTPException(status_code=400, detail="Gruppo non vuoto")
+    if cnt and not cascade:
+        raise HTTPException(status_code=400, detail=f"Gruppo non vuoto ({cnt} articoli). Usa cascade=true per eliminarlo con il suo contenuto.")
+    if cnt and cascade:
+        await db[coll].delete_many({"group_id": gid})
+        await log_movement(user, "item_delete", g["kind"], None, f"[{g['name']} + {cnt} articoli]",
+                           0, f"Eliminazione macrogruppo con {cnt} articoli")
     await db.groups.delete_one({"_id": oid(gid)})
-    return {"ok": True}
+    return {"ok": True, "deleted_items": cnt}
 
 # ---------- Raw items ----------
 @api.get("/raw-items")
