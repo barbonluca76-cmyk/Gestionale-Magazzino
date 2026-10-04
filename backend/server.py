@@ -108,6 +108,7 @@ class RawItemIn(BaseModel):
     unit: str = "pz"
     min_threshold: float = 0
     notes: Optional[str] = ""
+    barcode: Optional[str] = ""
 
 class FinishedItemIn(BaseModel):
     group_id: str
@@ -117,6 +118,12 @@ class FinishedItemIn(BaseModel):
     min_threshold: float = 0
     bottle_capacity_l: Optional[float] = 0.75
     notes: Optional[str] = ""
+    barcode: Optional[str] = ""
+
+class ScanAdjustIn(BaseModel):
+    code: str
+    quantity_delta: float
+    reason: str = "Scansione codice"
 
 class StockAdjustIn(BaseModel):
     quantity_delta: float
@@ -379,6 +386,43 @@ async def delete_finished(iid: str, user: dict = Depends(get_current_user)):
     await db.finished_items.delete_one({"_id": oid(iid)})
     await log_movement(user, "item_delete", "finished", iid, doc["name"], 0, "Eliminazione lotto")
     return {"ok": True}
+
+# ---------- Scan by barcode ----------
+@api.get("/scan/{code}")
+async def scan_lookup(code: str, _: dict = Depends(get_current_user)):
+    code = code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Codice vuoto")
+    raw = await db.raw_items.find_one({"barcode": code})
+    if raw:
+        g = await db.groups.find_one({"_id": oid(raw["group_id"])}) if raw.get("group_id") else None
+        return {"kind": "raw", "item": serialize(raw), "group_name": g["name"] if g else ""}
+    fin = await db.finished_items.find_one({"barcode": code})
+    if fin:
+        g = await db.groups.find_one({"_id": oid(fin["group_id"])}) if fin.get("group_id") else None
+        return {"kind": "finished", "item": serialize(fin), "group_name": g["name"] if g else ""}
+    raise HTTPException(status_code=404, detail=f"Nessun articolo con codice '{code}'")
+
+@api.post("/scan/adjust")
+async def scan_adjust(data: ScanAdjustIn, user: dict = Depends(get_current_user)):
+    code = data.code.strip()
+    raw = await db.raw_items.find_one({"barcode": code})
+    if raw:
+        new_q = (raw.get("quantity") or 0) + data.quantity_delta
+        await db.raw_items.update_one({"_id": raw["_id"]}, {"$set": {"quantity": new_q}})
+        await log_movement(user, "stock_adjust", "raw", str(raw["_id"]), raw["name"],
+                           data.quantity_delta, f"Scan — {data.reason}")
+        raw["quantity"] = new_q
+        return {"kind": "raw", "item": serialize(raw)}
+    fin = await db.finished_items.find_one({"barcode": code})
+    if fin:
+        new_q = (fin.get("quantity") or 0) + data.quantity_delta
+        await db.finished_items.update_one({"_id": fin["_id"]}, {"$set": {"quantity": new_q}})
+        await log_movement(user, "stock_adjust", "finished", str(fin["_id"]), fin["name"],
+                           data.quantity_delta, f"Scan — {data.reason}")
+        fin["quantity"] = new_q
+        return {"kind": "finished", "item": serialize(fin)}
+    raise HTTPException(status_code=404, detail=f"Nessun articolo con codice '{code}'")
 
 # ---------- Dashboard ----------
 @api.get("/dashboard/summary")
@@ -689,42 +733,42 @@ async def seed_demo():
     now = datetime.now(timezone.utc).isoformat()
     # Raw items
     raw_items = [
-        (raw_ids["Bottiglie vuote"], "Bordolese 0,75 L verde", 2400, "pz", 500),
-        (raw_ids["Bottiglie vuote"], "Bordolese 0,75 L bianca", 1800, "pz", 500),
-        (raw_ids["Bottiglie vuote"], "Renana 0,75 L", 1200, "pz", 400),
-        (raw_ids["Bottiglie vuote"], "Magnum 1,50 L", 180, "pz", 50),
-        (raw_ids["Bottiglie vuote"], "Mignon 0,20 L", 420, "pz", 100),
-        (raw_ids["Capsule"], "Capsula rossa 30×60", 3500, "pz", 500),
-        (raw_ids["Capsule"], "Capsula bordeaux 30×60", 60, "pz", 300),
-        (raw_ids["Capsule"], "Capsula oro 30×60", 1200, "pz", 300),
-        (raw_ids["Etichette"], "Etichetta Cabernet Riserva", 1500, "pz", 300),
-        (raw_ids["Etichette"], "Etichetta Prosecco Brut", 2200, "pz", 400),
-        (raw_ids["Etichette"], "Retroetichetta universale", 4500, "pz", 500),
-        (raw_ids["Tappi"], "Tappo sughero 44×24", 2800, "pz", 500),
-        (raw_ids["Tappi"], "Tappo sintetico", 1900, "pz", 400),
-        (raw_ids["Cartoni"], "Cartone 6 bott.", 320, "pz", 60),
-        (raw_ids["Cartoni"], "Cartone 12 bott.", 180, "pz", 40),
-        (raw_ids["Cartoni"], "Cartone 24 bott.", 40, "pz", 20),
+        (raw_ids["Bottiglie vuote"], "Bordolese 0,75 L verde", 2400, "pz", 500, "BOT-075-VERDE"),
+        (raw_ids["Bottiglie vuote"], "Bordolese 0,75 L bianca", 1800, "pz", 500, "BOT-075-BIANCA"),
+        (raw_ids["Bottiglie vuote"], "Renana 0,75 L", 1200, "pz", 400, "BOT-075-RENANA"),
+        (raw_ids["Bottiglie vuote"], "Magnum 1,50 L", 180, "pz", 50, "BOT-150-MAGNUM"),
+        (raw_ids["Bottiglie vuote"], "Mignon 0,20 L", 420, "pz", 100, "BOT-020-MIGNON"),
+        (raw_ids["Capsule"], "Capsula rossa 30×60", 3500, "pz", 500, "CAP-ROSSA"),
+        (raw_ids["Capsule"], "Capsula bordeaux 30×60", 60, "pz", 300, "CAP-BORDEAUX"),
+        (raw_ids["Capsule"], "Capsula oro 30×60", 1200, "pz", 300, "CAP-ORO"),
+        (raw_ids["Etichette"], "Etichetta Cabernet Riserva", 1500, "pz", 300, "ETI-CAB-RIS"),
+        (raw_ids["Etichette"], "Etichetta Prosecco Brut", 2200, "pz", 400, "ETI-PRO-BRUT"),
+        (raw_ids["Etichette"], "Retroetichetta universale", 4500, "pz", 500, "ETI-RETRO"),
+        (raw_ids["Tappi"], "Tappo sughero 44×24", 2800, "pz", 500, "TAP-SUGHERO"),
+        (raw_ids["Tappi"], "Tappo sintetico", 1900, "pz", 400, "TAP-SINT"),
+        (raw_ids["Cartoni"], "Cartone 6 bott.", 320, "pz", 60, "CRT-6"),
+        (raw_ids["Cartoni"], "Cartone 12 bott.", 180, "pz", 40, "CRT-12"),
+        (raw_ids["Cartoni"], "Cartone 24 bott.", 40, "pz", 20, "CRT-24"),
     ]
-    for g, n, q, u, m in raw_items:
+    for g, n, q, u, m, bc in raw_items:
         await db.raw_items.insert_one({
             "group_id": g, "name": n, "quantity": q, "unit": u,
-            "min_threshold": m, "notes": "", "created_at": now,
+            "min_threshold": m, "notes": "", "barcode": bc, "created_at": now,
         })
 
     fin_items = [
-        (fin_ids["Vini Rossi"], "Cabernet Riserva 2022 — Lotto A", 820, 0.75, 100),
-        (fin_ids["Vini Rossi"], "Merlot 2023 — Lotto B", 1240, 0.75, 150),
-        (fin_ids["Vini Bianchi"], "Chardonnay 2024 — Lotto C", 980, 0.75, 100),
-        (fin_ids["Vini Bianchi"], "Pinot Grigio 2024 — Lotto D", 60, 0.75, 150),
-        (fin_ids["Vini Rosati"], "Rosato Veneto 2024 — Lotto E", 420, 0.75, 80),
-        (fin_ids["Spumanti"], "Prosecco Brut 2024 — Lotto F", 1500, 0.75, 200),
+        (fin_ids["Vini Rossi"], "Cabernet Riserva 2022 — Lotto A", 820, 0.75, 100, "WINE-CAB-2022-A"),
+        (fin_ids["Vini Rossi"], "Merlot 2023 — Lotto B", 1240, 0.75, 150, "WINE-MER-2023-B"),
+        (fin_ids["Vini Bianchi"], "Chardonnay 2024 — Lotto C", 980, 0.75, 100, "WINE-CHA-2024-C"),
+        (fin_ids["Vini Bianchi"], "Pinot Grigio 2024 — Lotto D", 60, 0.75, 150, "WINE-PG-2024-D"),
+        (fin_ids["Vini Rosati"], "Rosato Veneto 2024 — Lotto E", 420, 0.75, 80, "WINE-ROS-2024-E"),
+        (fin_ids["Spumanti"], "Prosecco Brut 2024 — Lotto F", 1500, 0.75, 200, "WINE-PRO-2024-F"),
     ]
-    for g, n, q, cap, m in fin_items:
+    for g, n, q, cap, m, bc in fin_items:
         await db.finished_items.insert_one({
             "group_id": g, "name": n, "quantity": q, "unit": "bott.",
             "min_threshold": m, "bottle_capacity_l": cap, "notes": "",
-            "created_at": now,
+            "barcode": bc, "created_at": now,
         })
 
 @app.on_event("startup")

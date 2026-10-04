@@ -20,7 +20,7 @@ export default function MateriePrime() {
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
 
   const [itemDlg, setItemDlg] = useState({ open: false, edit: null });
-  const [itemForm, setItemForm] = useState({ name: "", quantity: 0, unit: "pz", min_threshold: 0, notes: "" });
+  const [itemForm, setItemForm] = useState({ name: "", quantity: 0, unit: "pz", min_threshold: 0, notes: "", barcode: "" });
 
   const [adjustDlg, setAdjustDlg] = useState({ open: false, item: null, delta: 0, reason: "" });
 
@@ -51,11 +51,11 @@ export default function MateriePrime() {
   };
 
   const openCreateItem = () => {
-    setItemForm({ name: "", quantity: 0, unit: "pz", min_threshold: 0, notes: "" });
+    setItemForm({ name: "", quantity: 0, unit: "pz", min_threshold: 0, notes: "", barcode: "" });
     setItemDlg({ open: true, edit: null });
   };
   const openEditItem = (it) => {
-    setItemForm({ name: it.name, quantity: it.quantity, unit: it.unit, min_threshold: it.min_threshold, notes: it.notes || "" });
+    setItemForm({ name: it.name, quantity: it.quantity, unit: it.unit, min_threshold: it.min_threshold, notes: it.notes || "", barcode: it.barcode || "" });
     setItemDlg({ open: true, edit: it });
   };
   const saveItem = async () => {
@@ -229,6 +229,9 @@ export default function MateriePrime() {
               <div><Label>Soglia min.</Label>
                 <Input type="number" value={itemForm.min_threshold} onChange={(e) => setItemForm({ ...itemForm, min_threshold: e.target.value })} data-testid="raw-item-threshold" />
               </div>
+            </div>
+            <div><Label>Codice (barcode/QR)</Label>
+              <Input value={itemForm.barcode} onChange={(e) => setItemForm({ ...itemForm, barcode: e.target.value })} data-testid="raw-item-barcode" placeholder="Es. BOT-075-VERDE" />
             </div>
             <div><Label>Note</Label>
               <Textarea value={itemForm.notes} onChange={(e) => setItemForm({ ...itemForm, notes: e.target.value })} />

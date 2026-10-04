@@ -11,6 +11,7 @@ import ProdottiFiniti from "@/pages/ProdottiFiniti";
 import Imbottigliamento from "@/pages/Imbottigliamento";
 import Cronologia from "@/pages/Cronologia";
 import Operatori from "@/pages/Operatori";
+import Scansione from "@/pages/Scansione";
 
 function Protected({ children }) {
   const { user } = useAuth();
@@ -37,6 +38,7 @@ function App() {
               <Route path="/materie-prime" element={<MateriePrime />} />
               <Route path="/prodotti-finiti" element={<ProdottiFiniti />} />
               <Route path="/imbottigliamento" element={<Imbottigliamento />} />
+              <Route path="/scansione" element={<Scansione />} />
               <Route path="/cronologia" element={<Cronologia />} />
               <Route path="/operatori" element={<Operatori />} />
             </Route>

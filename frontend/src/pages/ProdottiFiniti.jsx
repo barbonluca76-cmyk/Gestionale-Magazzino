@@ -23,7 +23,7 @@ export default function ProdottiFiniti() {
   const [newGroup, setNewGroup] = useState({ name: "", description: "" });
 
   const [itemDlg, setItemDlg] = useState({ open: false, edit: null });
-  const [itemForm, setItemForm] = useState({ name: "", quantity: 0, min_threshold: 0, bottle_capacity_l: 0.75, notes: "" });
+  const [itemForm, setItemForm] = useState({ name: "", quantity: 0, min_threshold: 0, bottle_capacity_l: 0.75, notes: "", barcode: "" });
 
   const [adjustDlg, setAdjustDlg] = useState({ open: false, item: null, delta: 0, reason: "" });
 
@@ -49,11 +49,11 @@ export default function ProdottiFiniti() {
   };
 
   const openCreateItem = () => {
-    setItemForm({ name: "", quantity: 0, min_threshold: 0, bottle_capacity_l: 0.75, notes: "" });
+    setItemForm({ name: "", quantity: 0, min_threshold: 0, bottle_capacity_l: 0.75, notes: "", barcode: "" });
     setItemDlg({ open: true, edit: null });
   };
   const openEditItem = (it) => {
-    setItemForm({ name: it.name, quantity: it.quantity, min_threshold: it.min_threshold, bottle_capacity_l: it.bottle_capacity_l || 0.75, notes: it.notes || "" });
+    setItemForm({ name: it.name, quantity: it.quantity, min_threshold: it.min_threshold, bottle_capacity_l: it.bottle_capacity_l || 0.75, notes: it.notes || "", barcode: it.barcode || "" });
     setItemDlg({ open: true, edit: it });
   };
   const saveItem = async () => {
@@ -221,6 +221,9 @@ export default function ProdottiFiniti() {
               <div><Label>Soglia min.</Label>
                 <Input type="number" value={itemForm.min_threshold} onChange={(e) => setItemForm({ ...itemForm, min_threshold: e.target.value })} />
               </div>
+            </div>
+            <div><Label>Codice (barcode/QR)</Label>
+              <Input value={itemForm.barcode} onChange={(e) => setItemForm({ ...itemForm, barcode: e.target.value })} data-testid="fin-item-barcode" placeholder="Es. WINE-CAB-2024-A" />
             </div>
             <div><Label>Note</Label>
               <Textarea value={itemForm.notes} onChange={(e) => setItemForm({ ...itemForm, notes: e.target.value })} />

@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   LayoutDashboard, Package2, Wine, FileText, History,
-  Users, LogOut, Grape
+  Users, LogOut, Grape, ScanLine
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -11,6 +11,7 @@ const nav = [
   { to: "/materie-prime", label: "Materie Prime", icon: Package2, tid: "nav-materie" },
   { to: "/prodotti-finiti", label: "Prodotti Finiti", icon: Wine, tid: "nav-finiti" },
   { to: "/imbottigliamento", label: "Imbottigliamento", icon: FileText, tid: "nav-imbottigliamento" },
+  { to: "/scansione", label: "Scansione Codice", icon: ScanLine, tid: "nav-scansione" },
   { to: "/cronologia", label: "Cronologia", icon: History, tid: "nav-cronologia" },
   { to: "/operatori", label: "Operatori", icon: Users, tid: "nav-operatori" },
 ];
