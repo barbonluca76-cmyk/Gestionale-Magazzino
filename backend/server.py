@@ -1033,6 +1033,8 @@ async def seed_demo():
         ("Etichette", "Etichette e retroetichette"),
         ("Tappi", "Tappi in sughero e sintetici"),
         ("Cartoni", "Cartoni da imballaggio"),
+        ("Gabbietta", "Gabbiette metalliche per spumante"),
+        ("Alveare/divisorio", "Alveari e divisori per cartone"),
     ]
     fin_groups = [
         ("Vini Rossi", "Rossi fermi"),

@@ -48,8 +48,8 @@ function SiNo({ value, onChange, name }) {
   );
 }
 
-/* Reusable component row: [check] [select+manual] [fornita_da] [optional qty] */
-function ComponentRow({ label, cmp, onChange, options, autoFillSupplier, showQty, autoQty }) {
+/* Reusable component row: [check] [select+manual OR manual-only] [fornita_da] [optional qty] */
+function ComponentRow({ label, cmp, onChange, options, autoFillSupplier, showQty, autoQty, manualOnly = false }) {
   const isManual = cmp.art_id === "__manual__";
   const setK = (k, v) => onChange({ ...cmp, [k]: v });
   return (
@@ -63,22 +63,33 @@ function ComponentRow({ label, cmp, onChange, options, autoFillSupplier, showQty
       </div>
       <Label className="pt-2 text-sm font-medium text-stone-700">{label}</Label>
       <div className="space-y-2">
-        <Select value={cmp.art_id || ""} onValueChange={(v) => setK("art_id", v)}>
-          <SelectTrigger data-testid={`cmp-${label}-art`}>
-            <SelectValue placeholder="Scegli dal magazzino…" />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((o) => (
-              <SelectItem key={o.id} value={o.id}>
-                {o.name}{o.quantity !== undefined ? ` — ${o.quantity} in scorta` : ""}
-              </SelectItem>
-            ))}
-            <SelectItem value="__manual__">+ Inserisci manualmente</SelectItem>
-          </SelectContent>
-        </Select>
-        {isManual && (
-          <Input value={cmp.manual_name || ""} onChange={(e) => setK("manual_name", e.target.value)}
-            placeholder="Nome articolo (manuale)" />
+        {manualOnly ? (
+          <Input
+            value={cmp.manual_name || ""}
+            onChange={(e) => { setK("manual_name", e.target.value); if (!cmp.art_id) setK("art_id", "__manual__"); }}
+            placeholder="Nome articolo"
+            data-testid={`cmp-${label}-manual`}
+          />
+        ) : (
+          <>
+            <Select value={cmp.art_id || ""} onValueChange={(v) => setK("art_id", v)}>
+              <SelectTrigger data-testid={`cmp-${label}-art`}>
+                <SelectValue placeholder="Scegli dal magazzino…" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}{o.quantity !== undefined ? ` — ${o.quantity} in scorta` : ""}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__manual__">+ Inserisci manualmente</SelectItem>
+              </SelectContent>
+            </Select>
+            {isManual && (
+              <Input value={cmp.manual_name || ""} onChange={(e) => setK("manual_name", e.target.value)}
+                placeholder="Nome articolo (manuale)" />
+            )}
+          </>
         )}
       </div>
       <Input value={cmp.fornita_da || ""} onChange={(e) => setK("fornita_da", e.target.value)}
@@ -245,6 +256,8 @@ export default function Imbottigliamento() {
   const optTappi = optionsByGroup(["Tappi"]);
   const optLabels = optionsByGroup(["Etichette"]);
   const optCartons = optionsByGroup(["Cartoni"]);
+  const optGabbietta = optionsByGroup(["Gabbietta"]);
+  const optAlveare = optionsByGroup(["Alveare/divisorio"]);
   const optAll = rawItems;
 
   const submit = async () => {
@@ -286,7 +299,7 @@ export default function Imbottigliamento() {
         tappo_articolo: resolveName(fd.tappo, optTappi),
         chiusura_articolo: resolveName(fd.chiusura, optTappi),
         chiusura_fornita_da: fd.chiusura?.fornita_da || "",
-        gabbietta_articolo: resolveName(fd.gabbietta, optAll),
+        gabbietta_articolo: resolveName(fd.gabbietta, optGabbietta),
         gabbietta_fornita_da: fd.gabbietta?.fornita_da || "",
         capsula_articolo: resolveName(fd.capsula, optCaps),
         capsula_fornita_da: fd.capsula?.fornita_da || "",
@@ -306,11 +319,11 @@ export default function Imbottigliamento() {
         cartone_articolo: resolveName(fd.cartone, optCartons),
         alveare_divisorio: !!fd.alveare?.used,
         alveare_fornita_da: fd.alveare?.fornita_da || "",
-        alveare_articolo: resolveName(fd.alveare, optAll),
+        alveare_articolo: resolveName(fd.alveare, optAlveare),
         alveare_quantita: fd.alveare?.quantity ?? "",
         etichetta_cartone: !!fd.etichetta_cartone?.used,
         etichetta_cartone_fornita_da: fd.etichetta_cartone?.fornita_da || "",
-        etichetta_cartone_articolo: resolveName(fd.etichetta_cartone, optLabels),
+        etichetta_cartone_articolo: fd.etichetta_cartone?.manual_name || "",
         etichetta_cartone_quantita: fd.etichetta_cartone?.quantity ?? "",
       };
 
@@ -521,7 +534,7 @@ export default function Imbottigliamento() {
         <ComponentRow label="Chiusura" cmp={fd.chiusura} onChange={setCmp("chiusura")}
           options={optTappi.length ? optTappi : optAll} autoFillSupplier={supplierIsBarbon} />
         <ComponentRow label="Gabbietta" cmp={fd.gabbietta} onChange={setCmp("gabbietta")}
-          options={optAll} autoFillSupplier={supplierIsBarbon} />
+          options={optGabbietta} autoFillSupplier={supplierIsBarbon} />
         <ComponentRow label="Capsula" cmp={fd.capsula} onChange={setCmp("capsula")}
           options={optCaps.length ? optCaps : optAll} autoFillSupplier={supplierIsBarbon} />
       </SectionCard>
@@ -569,10 +582,10 @@ export default function Imbottigliamento() {
           options={optCartons.length ? optCartons : optAll} autoFillSupplier={supplierIsBarbon}
           showQty autoQty={suggestedCartons} />
         <ComponentRow label="Alveare/divisorio" cmp={fd.alveare} onChange={setCmp("alveare")}
-          options={optAll} autoFillSupplier={supplierIsBarbon}
+          options={optAlveare} autoFillSupplier={supplierIsBarbon}
           showQty autoQty={suggestedCartons} />
         <ComponentRow label="Etichetta su cartone" cmp={fd.etichetta_cartone} onChange={setCmp("etichetta_cartone")}
-          options={optLabels.length ? optLabels : optAll} autoFillSupplier={supplierIsBarbon}
+          options={[]} manualOnly autoFillSupplier={supplierIsBarbon}
           showQty autoQty={suggestedCartons} />
         <div className="grid md:grid-cols-[180px_1fr] items-center gap-3 pt-3 border-t border-stone-100">
           <Label>Nastratrice</Label>
