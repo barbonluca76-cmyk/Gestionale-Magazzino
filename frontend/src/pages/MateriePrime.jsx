@@ -189,6 +189,7 @@ export default function MateriePrime() {
             <TableHeader>
               <TableRow>
                 <TableHead>Articolo</TableHead>
+                <TableHead>Codice</TableHead>
                 <TableHead className="text-right">Quantità</TableHead>
                 <TableHead className="text-right">Soglia min.</TableHead>
                 <TableHead>Stato</TableHead>
@@ -203,6 +204,15 @@ export default function MateriePrime() {
                     <TableCell>
                       <div className="font-medium text-stone-800">{it.name}</div>
                       {it.notes && <div className="text-xs text-stone-500">{it.notes}</div>}
+                    </TableCell>
+                    <TableCell>
+                      {it.barcode ? (
+                        <span className="font-mono-num text-xs bg-stone-100 border border-stone-200 px-2 py-1 rounded text-stone-700">
+                          {it.barcode}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-stone-400 italic">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-mono-num">{it.quantity} {it.unit}</TableCell>
                     <TableCell className="text-right font-mono-num text-stone-500">{it.min_threshold}</TableCell>
@@ -225,7 +235,7 @@ export default function MateriePrime() {
                 );
               })}
               {items.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center text-stone-500 py-8">Nessun articolo in questo macrogruppo.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={6} className="text-center text-stone-500 py-8">Nessun articolo in questo macrogruppo.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
