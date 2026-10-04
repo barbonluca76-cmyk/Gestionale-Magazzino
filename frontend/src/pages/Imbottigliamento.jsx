@@ -8,15 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { FileText, Info, Plus, Pencil } from "lucide-react";
+import { FileText, Info, Pencil } from "lucide-react";
 
 const CAPACITIES = [0.20, 0.35, 0.50, 0.75, 1.50, 3.00];
 const CARTON_SIZES = [6, 12, 24];
+const MICRO_OPTIONS = [
+  { v: "1", l: "1 μm" },
+  { v: "0.65", l: "0,65 μm" },
+  { v: "0.45", l: "0,45 μm" },
+];
 
-/* --------------- small reusable pieces --------------- */
-
+/* -------- building blocks -------- */
 function SectionCard({ title, children }) {
   return (
     <Card className="card-elevated">
@@ -29,16 +33,11 @@ function SectionCard({ title, children }) {
     </Card>
   );
 }
-
 function SiNo({ value, onChange, name }) {
-  // value: true | false | null
   const asStr = value === true ? "si" : value === false ? "no" : "";
   return (
-    <RadioGroup
-      className="flex items-center gap-4"
-      value={asStr}
-      onValueChange={(v) => onChange(v === "si" ? true : v === "no" ? false : null)}
-    >
+    <RadioGroup className="flex items-center gap-4" value={asStr}
+      onValueChange={(v) => onChange(v === "si" ? true : v === "no" ? false : null)}>
       <label className="flex items-center gap-1.5 text-sm cursor-pointer">
         <RadioGroupItem value="si" data-testid={`${name}-si`} /> SI
       </label>
@@ -49,17 +48,54 @@ function SiNo({ value, onChange, name }) {
   );
 }
 
-function LabeledRow({ label, children, className = "" }) {
+/* Reusable component row: [check] [select+manual] [fornita_da] [optional qty] */
+function ComponentRow({ label, cmp, onChange, options, autoFillSupplier, showQty, autoQty }) {
+  const isManual = cmp.art_id === "__manual__";
+  const setK = (k, v) => onChange({ ...cmp, [k]: v });
   return (
-    <div className={`grid md:grid-cols-[180px_1fr] items-center gap-3 ${className}`}>
-      <Label className="text-sm font-medium text-stone-700">{label}</Label>
-      <div>{children}</div>
+    <div className="grid md:grid-cols-[20px_140px_1fr_1fr_120px] items-start gap-3 py-2 border-b border-stone-100 last:border-0">
+      <div className="pt-2">
+        <Checkbox
+          checked={!!cmp.used}
+          onCheckedChange={(v) => setK("used", !!v)}
+          data-testid={`cmp-${label}-used`}
+        />
+      </div>
+      <Label className="pt-2 text-sm font-medium text-stone-700">{label}</Label>
+      <div className="space-y-2">
+        <Select value={cmp.art_id || ""} onValueChange={(v) => setK("art_id", v)}>
+          <SelectTrigger data-testid={`cmp-${label}-art`}>
+            <SelectValue placeholder="Scegli dal magazzino…" />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.name}{o.quantity !== undefined ? ` — ${o.quantity} in scorta` : ""}
+              </SelectItem>
+            ))}
+            <SelectItem value="__manual__">+ Inserisci manualmente</SelectItem>
+          </SelectContent>
+        </Select>
+        {isManual && (
+          <Input value={cmp.manual_name || ""} onChange={(e) => setK("manual_name", e.target.value)}
+            placeholder="Nome articolo (manuale)" />
+        )}
+      </div>
+      <Input value={cmp.fornita_da || ""} onChange={(e) => setK("fornita_da", e.target.value)}
+        placeholder={autoFillSupplier ? "Tenuta Barbon" : "Fornita da…"} />
+      {showQty ? (
+        <Input type="number" min="0"
+          value={cmp.quantity ?? ""}
+          onChange={(e) => setK("quantity", e.target.value)}
+          placeholder={autoQty ? String(autoQty) : "Quantità"}
+          data-testid={`cmp-${label}-qty`}
+        />
+      ) : <div />}
     </div>
   );
 }
 
-/* --------------- main page --------------- */
-
+/* -------- page -------- */
 export default function Imbottigliamento() {
   const { id: editId } = useParams();
   const navigate = useNavigate();
@@ -68,15 +104,13 @@ export default function Imbottigliamento() {
   const [rawGroups, setRawGroups] = useState([]);
   const [rawItems, setRawItems] = useState([]);
   const [finGroups, setFinGroups] = useState([]);
-  const [finItems, setFinItems] = useState([]);
   const [editMeta, setEditMeta] = useState(null);
 
+  const todayIso = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
     supplier: "tenuta_barbon",
     client_name: "",
     wine_name: "",
-    finished_item_id: "__new__",
-    new_lot_name: "",
     finished_group_id: "",
     bottle_count: 1200,
     bottle_capacity_l: "0.75",
@@ -84,43 +118,34 @@ export default function Imbottigliamento() {
     carton_count: 100,
     notes: "",
   });
-  const [materials, setMaterials] = useState({});
 
-  // Extended paper-form fields
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const emptyCmp = { used: false, art_id: "", manual_name: "", fornita_da: "", quantity: "" };
   const [fd, setFd] = useState({
     azienda: "",
     data_lavoro: todayIso,
-    partita_n: "",
     annata: "",
     tipologia: "",
     numero_lotto: "",
     // filtrazione
     filtrazione_tangenziale: null,
-    filtrazione_microporica: "",
+    filtrazione_microporica: [], // multi
     dosatore_coadiuvante: null,
     dosaggio: "",
-    // bottiglia
-    bottiglia_fornita_da: "",
-    chiusura_fornita_da: "",
-    gabbietta_fornita_da: "",
-    capsula_fornita_da: "",
+    // componenti bottiglia
+    bottiglia: { ...emptyCmp },
+    tappo: { ...emptyCmp },
+    chiusura: { ...emptyCmp },
+    gabbietta: { ...emptyCmp },
+    capsula: { ...emptyCmp },
     // etichettatura
-    etichetta_fronte: null,
-    etichetta_fronte_fornita_da: "",
-    etichetta_retro: null,
-    etichetta_retro_fornita_da: "",
-    fascetta: null,
-    fascetta_fornita_da: "",
+    etichetta_fronte: { ...emptyCmp },
+    etichetta_retro: { ...emptyCmp },
+    fascetta: { ...emptyCmp },
     centratura_ottica: null,
     // confezionamento
-    cartone_fornita_da: "",
-    alveare_divisorio: null,
-    alveare_fornita_da: "",
-    alveare_quantita: "",
-    etichetta_cartone: null,
-    etichetta_cartone_fornita_da: "",
-    etichetta_cartone_quantita: "",
+    cartone: { ...emptyCmp },
+    alveare: { ...emptyCmp },
+    etichetta_cartone: { ...emptyCmp },
     nastratrice: null,
     // palette
     palette: null,
@@ -142,18 +167,17 @@ export default function Imbottigliamento() {
     falde_pvc_quantita: "",
   });
   const sf = (k) => (v) => setFd((p) => ({ ...p, [k]: v }));
+  const setCmp = (k) => (next) => setFd((p) => ({ ...p, [k]: next }));
 
-  // Load options and (if edit) the record
   useEffect(() => {
     (async () => {
       try {
-        const [a, b, c, d] = await Promise.all([
+        const [a, b, c] = await Promise.all([
           api.get("/groups", { params: { kind: "raw" } }),
           api.get("/raw-items"),
           api.get("/groups", { params: { kind: "finished" } }),
-          api.get("/finished-items"),
         ]);
-        setRawGroups(a.data); setRawItems(b.data); setFinGroups(c.data); setFinItems(d.data);
+        setRawGroups(a.data); setRawItems(b.data); setFinGroups(c.data);
 
         if (editId) {
           const { data: rec } = await api.get(`/bottling/${editId}`);
@@ -161,22 +185,18 @@ export default function Imbottigliamento() {
             operator_name: rec.operator_name, created_at: rec.created_at,
             edited_by: rec.edited_by, edited_at: rec.edited_at,
           });
-          setForm({
+          setForm((p) => ({
+            ...p,
             supplier: rec.supplier,
             client_name: rec.client_name || "",
             wine_name: rec.wine_name || "",
-            finished_item_id: rec.finished_item_id || "__new__",
-            new_lot_name: "",
-            finished_group_id: "",
+            finished_group_id: rec.form_data?._group_id || "",
             bottle_count: rec.bottle_count,
             bottle_capacity_l: String(rec.bottle_capacity_l),
             carton_size: String(rec.carton_size),
             carton_count: rec.carton_count,
             notes: rec.notes || "",
-          });
-          const mats = {};
-          (rec.materials || []).forEach((m) => { mats[m.raw_item_id] = m.quantity; });
-          setMaterials(mats);
+          }));
           if (rec.form_data) setFd((p) => ({ ...p, ...rec.form_data }));
         }
       } catch (e) { toast.error(formatApiError(e)); }
@@ -184,15 +204,24 @@ export default function Imbottigliamento() {
     // eslint-disable-next-line
   }, [editId]);
 
-  // Auto-fill C/ Lavoro Azienda when supplier/client changes
+  // Supplier auto-fill of "fornita da" on all component rows
   useEffect(() => {
-    setFd((p) => ({
-      ...p,
-      azienda: form.supplier === "tenuta_barbon" ? "Tenuta Barbon" : (form.client_name || ""),
-    }));
+    const value = form.supplier === "tenuta_barbon" ? "Tenuta Barbon" : "";
+    setFd((p) => {
+      const next = { ...p, azienda: form.supplier === "tenuta_barbon" ? "Tenuta Barbon" : (form.client_name || "") };
+      ["bottiglia","tappo","chiusura","gabbietta","capsula",
+       "etichetta_fronte","etichetta_retro","fascetta",
+       "cartone","alveare","etichetta_cartone"].forEach((k) => {
+        next[k] = { ...(p[k] || emptyCmp), fornita_da: value };
+      });
+      next.palette_fornita_da = value;
+      next.cestoni_fornita_da = value;
+      next.falde_pvc_fornita_da = value;
+      return next;
+    });
+    // eslint-disable-next-line
   }, [form.supplier, form.client_name]);
 
-  // HL + suggested cartons
   const hl = useMemo(
     () => (Number(form.bottle_count) * Number(form.bottle_capacity_l)) / 100,
     [form.bottle_count, form.bottle_capacity_l]
@@ -206,53 +235,99 @@ export default function Imbottigliamento() {
     // eslint-disable-next-line
   }, [form.bottle_count, form.carton_size]);
 
-  const setMat = (id, q) => setMaterials((m) => ({ ...m, [id]: q }));
-
-  const suggestedFor = (item) => {
-    const g = rawGroups.find((g) => g.id === item.group_id);
-    const name = g?.name || "";
-    if (name === "Cartoni") {
-      if (!item.name.includes(String(form.carton_size))) return 0;
-      return suggestedCartons;
-    }
-    if (name === "Bottiglie vuote") {
-      const capStr = Number(form.bottle_capacity_l).toString().replace(".", ",");
-      if (!item.name.includes(capStr)) return 0;
-      return Number(form.bottle_count);
-    }
-    return Number(form.bottle_count);
+  // Options for component dropdowns (filtered by raw-group name)
+  const optionsByGroup = (groupNames) => {
+    const ids = rawGroups.filter((g) => groupNames.includes(g.name)).map((g) => g.id);
+    return rawItems.filter((it) => ids.includes(it.group_id));
   };
-
-  const applySuggestions = () => {
-    const next = {};
-    rawItems.forEach((it) => {
-      const s = suggestedFor(it);
-      if (s > 0) next[it.id] = s;
-    });
-    setMaterials(next);
-    toast.success("Suggerimenti applicati");
-  };
+  const optBottles = optionsByGroup(["Bottiglie vuote"]);
+  const optCaps = optionsByGroup(["Capsule"]);
+  const optTappi = optionsByGroup(["Tappi"]);
+  const optLabels = optionsByGroup(["Etichette"]);
+  const optCartons = optionsByGroup(["Cartoni"]);
+  const optAll = rawItems;
 
   const submit = async () => {
     try {
-      const mats = Object.entries(materials)
-        .map(([raw_item_id, quantity]) => ({ raw_item_id, quantity: Number(quantity) || 0 }))
-        .filter((m) => m.quantity > 0);
+      if (!form.wine_name.trim()) { toast.error("Inserisci il nome del vino"); return; }
+      if (!form.finished_group_id) { toast.error("Seleziona la tipologia (macrogruppo)"); return; }
+
+      // Build materials[] from inline rows for inventory deduction
+      const bottles = Number(form.bottle_count);
+      const cartons = Number(form.carton_count);
+      const rowsForBottles = ["bottiglia","tappo","chiusura","gabbietta","capsula",
+                              "etichetta_fronte","etichetta_retro","fascetta"];
+      const rowsForCartons = ["cartone","alveare","etichetta_cartone"];
+      const materials = [];
+      rowsForBottles.forEach((k) => {
+        const c = fd[k];
+        if (c?.used && c.art_id && c.art_id !== "__manual__") {
+          const qty = Number(c.quantity) > 0 ? Number(c.quantity) : bottles;
+          materials.push({ raw_item_id: c.art_id, quantity: qty });
+        }
+      });
+      rowsForCartons.forEach((k) => {
+        const c = fd[k];
+        if (c?.used && c.art_id && c.art_id !== "__manual__") {
+          const qty = Number(c.quantity) > 0 ? Number(c.quantity) : cartons;
+          materials.push({ raw_item_id: c.art_id, quantity: qty });
+        }
+      });
+
+      // Snapshot of readable component names in form_data (for PDF)
+      const resolveName = (c, opts) =>
+        c?.art_id === "__manual__" ? (c.manual_name || "") :
+        (opts.find((o) => o.id === c?.art_id)?.name || "");
+      const form_data = {
+        ...fd,
+        _group_id: form.finished_group_id,
+        bottiglia_fornita_da: fd.bottiglia?.fornita_da || "",
+        bottiglia_articolo: resolveName(fd.bottiglia, optBottles.length ? optBottles : optAll),
+        tappo_articolo: resolveName(fd.tappo, optTappi),
+        chiusura_articolo: resolveName(fd.chiusura, optTappi),
+        chiusura_fornita_da: fd.chiusura?.fornita_da || "",
+        gabbietta_articolo: resolveName(fd.gabbietta, optAll),
+        gabbietta_fornita_da: fd.gabbietta?.fornita_da || "",
+        capsula_articolo: resolveName(fd.capsula, optCaps),
+        capsula_fornita_da: fd.capsula?.fornita_da || "",
+        etichetta_fronte: !!fd.etichetta_fronte?.used,
+        etichetta_fronte_fornita_da: fd.etichetta_fronte?.fornita_da || "",
+        etichetta_fronte_articolo: resolveName(fd.etichetta_fronte, optLabels),
+        etichetta_fronte_quantita: fd.etichetta_fronte?.quantity ?? "",
+        etichetta_retro: !!fd.etichetta_retro?.used,
+        etichetta_retro_fornita_da: fd.etichetta_retro?.fornita_da || "",
+        etichetta_retro_articolo: resolveName(fd.etichetta_retro, optLabels),
+        etichetta_retro_quantita: fd.etichetta_retro?.quantity ?? "",
+        fascetta: !!fd.fascetta?.used,
+        fascetta_fornita_da: fd.fascetta?.fornita_da || "",
+        fascetta_articolo: resolveName(fd.fascetta, optLabels),
+        fascetta_quantita: fd.fascetta?.quantity ?? "",
+        cartone_fornita_da: fd.cartone?.fornita_da || "",
+        cartone_articolo: resolveName(fd.cartone, optCartons),
+        alveare_divisorio: !!fd.alveare?.used,
+        alveare_fornita_da: fd.alveare?.fornita_da || "",
+        alveare_articolo: resolveName(fd.alveare, optAll),
+        alveare_quantita: fd.alveare?.quantity ?? "",
+        etichetta_cartone: !!fd.etichetta_cartone?.used,
+        etichetta_cartone_fornita_da: fd.etichetta_cartone?.fornita_da || "",
+        etichetta_cartone_articolo: resolveName(fd.etichetta_cartone, optLabels),
+        etichetta_cartone_quantita: fd.etichetta_cartone?.quantity ?? "",
+      };
 
       const payload = {
         supplier: form.supplier,
         client_name: form.supplier === "cliente" ? form.client_name : "",
-        wine_name: form.wine_name || form.new_lot_name,
-        finished_item_id: form.finished_item_id !== "__new__" ? form.finished_item_id : null,
-        new_lot_name: form.finished_item_id === "__new__" ? form.new_lot_name : null,
-        finished_group_id: form.finished_item_id === "__new__" ? form.finished_group_id : null,
-        bottle_count: Number(form.bottle_count),
+        wine_name: form.wine_name,
+        finished_item_id: null,
+        new_lot_name: form.wine_name,
+        finished_group_id: form.finished_group_id,
+        bottle_count: bottles,
         bottle_capacity_l: Number(form.bottle_capacity_l),
         carton_size: Number(form.carton_size),
-        carton_count: Number(form.carton_count),
-        materials: mats,
+        carton_count: cartons,
+        materials,
         notes: form.notes,
-        form_data: fd,
+        form_data,
       };
 
       let recordId;
@@ -265,7 +340,6 @@ export default function Imbottigliamento() {
         recordId = data.id;
         toast.success("Imbottigliamento registrato");
       }
-
       try {
         const resp = await api.get(`/bottling/${recordId}/pdf`, { responseType: "blob" });
         const url = URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
@@ -273,25 +347,12 @@ export default function Imbottigliamento() {
         a.href = url; a.download = `imbottigliamento_${recordId}.pdf`;
         a.click(); URL.revokeObjectURL(url);
       } catch (_e) { /* ignore */ }
-
       if (isEdit) navigate("/cronologia");
-      else {
-        setMaterials({});
-        setForm((f) => ({ ...f, wine_name: "", new_lot_name: "", bottle_count: 1200, notes: "" }));
-      }
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
-  const byGroup = useMemo(() => {
-    const m = {};
-    rawItems.forEach((it) => {
-      const g = rawGroups.find((g) => g.id === it.group_id);
-      const key = g?.name || "Altri";
-      if (!m[key]) m[key] = [];
-      m[key].push(it);
-    });
-    return m;
-  }, [rawItems, rawGroups]);
+  const supplierIsBarbon = form.supplier === "tenuta_barbon";
+  const bottleQty = Number(form.bottle_count) || 0;
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto" data-testid="bottling-root">
@@ -309,27 +370,24 @@ export default function Imbottigliamento() {
         )}
       </div>
 
-      {/* Supplier choice (rules deduzione magazzino) */}
+      {/* Supplier */}
       <Card className="card-elevated">
         <CardContent className="p-5 space-y-3">
           <Label className="text-sm font-semibold">Chi ha fornito il materiale?</Label>
-          <RadioGroup
-            className="grid grid-cols-1 md:grid-cols-2 gap-3"
-            value={form.supplier}
-            onValueChange={(v) => setForm({ ...form, supplier: v })}
-          >
-            <label className={`flex items-start gap-3 border rounded-lg p-3 cursor-pointer ${form.supplier === "tenuta_barbon" ? "border-[#6B1D2F] bg-[#6B1D2F]/5" : "border-stone-200"}`}>
+          <RadioGroup className="grid grid-cols-1 md:grid-cols-2 gap-3"
+            value={form.supplier} onValueChange={(v) => setForm({ ...form, supplier: v })}>
+            <label className={`flex items-start gap-3 border rounded-lg p-3 cursor-pointer ${supplierIsBarbon ? "border-[#6B1D2F] bg-[#6B1D2F]/5" : "border-stone-200"}`}>
               <RadioGroupItem value="tenuta_barbon" data-testid="supplier-barbon" />
               <div>
                 <div className="font-medium text-sm">Tenuta Barbon</div>
-                <div className="text-xs text-stone-500">Le quantità saranno sottratte dal magazzino.</div>
+                <div className="text-xs text-stone-500">I campi "Fornita da" verranno compilati automaticamente.</div>
               </div>
             </label>
             <label className={`flex items-start gap-3 border rounded-lg p-3 cursor-pointer ${form.supplier === "cliente" ? "border-sky-500 bg-sky-50" : "border-stone-200"}`}>
               <RadioGroupItem value="cliente" data-testid="supplier-cliente" />
               <div>
                 <div className="font-medium text-sm">Cliente / Conto terzi</div>
-                <div className="text-xs text-stone-500">Nessuna detrazione dal magazzino.</div>
+                <div className="text-xs text-stone-500">Nessuna detrazione dal magazzino. Scrivi tu i fornitori.</div>
               </div>
             </label>
           </RadioGroup>
@@ -342,25 +400,21 @@ export default function Imbottigliamento() {
         </CardContent>
       </Card>
 
-      {/* Header strip + title */}
+      {/* Header strip */}
       <Card className="card-elevated">
         <CardContent className="p-5 space-y-4">
           <div className="grid md:grid-cols-[2fr_1fr] gap-4">
             <div>
               <Label>C/ Lavoro Azienda</Label>
-              <Input value={fd.azienda} onChange={(e) => sf("azienda")(e.target.value)} data-testid="azienda-input" />
+              <Input value={fd.azienda} onChange={(e) => sf("azienda")(e.target.value)} />
             </div>
             <div>
               <Label>Data</Label>
-              <Input type="date" value={fd.data_lavoro} onChange={(e) => sf("data_lavoro")(e.target.value)} data-testid="data-input" />
+              <Input type="date" value={fd.data_lavoro} onChange={(e) => sf("data_lavoro")(e.target.value)} />
             </div>
           </div>
           <div className="text-center text-[11px] uppercase tracking-[0.14em] font-semibold text-stone-700 bg-stone-100 border border-stone-200 rounded-md py-2">
             Specifiche riguardanti le modalità dell'imbottigliamento e confezionamento
-          </div>
-          <div>
-            <Label>Partita n°</Label>
-            <Input value={fd.partita_n} onChange={(e) => sf("partita_n")(e.target.value)} data-testid="partita-input" placeholder="Es. 2026-012" />
           </div>
         </CardContent>
       </Card>
@@ -369,37 +423,19 @@ export default function Imbottigliamento() {
       <SectionCard title="Caratteristiche">
         <div className="grid md:grid-cols-2 gap-4">
           <div>
-            <Label>Lotto destinazione</Label>
-            <Select value={form.finished_item_id} onValueChange={(v) => setForm({ ...form, finished_item_id: v })}>
-              <SelectTrigger data-testid="finished-select"><SelectValue /></SelectTrigger>
+            <Label>Vino</Label>
+            <Input value={form.wine_name} onChange={(e) => setForm({ ...form, wine_name: e.target.value })}
+              placeholder="Es. Cabernet Riserva 2024" data-testid="wine-name" />
+          </div>
+          <div>
+            <Label>Tipologia vino (macrogruppo)</Label>
+            <Select value={form.finished_group_id} onValueChange={(v) => setForm({ ...form, finished_group_id: v })}>
+              <SelectTrigger data-testid="wine-group"><SelectValue placeholder="Seleziona…" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="__new__">+ Crea nuovo lotto</SelectItem>
-                {finItems.map((f) => <SelectItem key={f.id} value={f.id}>{f.name} ({f.quantity} bott.)</SelectItem>)}
+                {finGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label>Vino</Label>
-            <Input
-              value={form.finished_item_id === "__new__" ? form.new_lot_name : form.wine_name}
-              onChange={(e) => form.finished_item_id === "__new__"
-                ? setForm({ ...form, new_lot_name: e.target.value, wine_name: e.target.value })
-                : setForm({ ...form, wine_name: e.target.value })}
-              data-testid="wine-name"
-              placeholder="Es. Cabernet Riserva — Lotto A"
-            />
-          </div>
-          {form.finished_item_id === "__new__" && (
-            <div>
-              <Label>Tipologia vino (macrogruppo)</Label>
-              <Select value={form.finished_group_id} onValueChange={(v) => setForm({ ...form, finished_group_id: v })}>
-                <SelectTrigger data-testid="new-lot-group"><SelectValue placeholder="Seleziona…" /></SelectTrigger>
-                <SelectContent>
-                  {finGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
           <div>
             <Label>Annata</Label>
             <Input value={fd.annata} onChange={(e) => sf("annata")(e.target.value)} placeholder="2024" />
@@ -421,25 +457,48 @@ export default function Imbottigliamento() {
             <div className="h-10 flex items-center font-mono-num text-[#6B1D2F] font-bold text-xl" data-testid="hl-value">{hl.toFixed(2)} HL</div>
             <div className="text-[11px] text-stone-500">({form.bottle_count} × {form.bottle_capacity_l} L) / 100</div>
           </div>
+          <div>
+            <Label>Capacità bottiglia</Label>
+            <Select value={String(form.bottle_capacity_l)} onValueChange={(v) => setForm({ ...form, bottle_capacity_l: v })}>
+              <SelectTrigger data-testid="bottle-capacity"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {CAPACITIES.map((c) => <SelectItem key={c} value={String(c)}>{c.toFixed(2)} L</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </SectionCard>
 
       {/* FILTRAZIONE */}
       <SectionCard title="Filtrazione">
-        <LabeledRow label="Tangenziale">
-          <SiNo name="filt-tang" value={fd.filtrazione_tangenziale} onChange={sf("filtrazione_tangenziale")} />
-        </LabeledRow>
-        <LabeledRow label="Microporica">
-          <RadioGroup className="flex items-center gap-5" value={fd.filtrazione_microporica} onValueChange={sf("filtrazione_microporica")}>
-            {["1", "0.65", "0.45"].map((v) => (
-              <label key={v} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <RadioGroupItem value={v} data-testid={`micro-${v}`} />
-                {v.replace(".", ",")} μm
-              </label>
-            ))}
-          </RadioGroup>
-        </LabeledRow>
-        <LabeledRow label="Dosatore coadiuvante (post filtrazione)">
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Tangenziale</Label>
+          <SiNo name="tang" value={fd.filtrazione_tangenziale} onChange={sf("filtrazione_tangenziale")} />
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-start gap-3">
+          <Label className="pt-1">Microporica <span className="text-[10px] text-stone-500">(scelta multipla)</span></Label>
+          <div className="flex items-center gap-6 flex-wrap">
+            {MICRO_OPTIONS.map((o) => {
+              const checked = (fd.filtrazione_microporica || []).includes(o.v);
+              return (
+                <label key={o.v} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <Checkbox
+                    checked={checked}
+                    onCheckedChange={(v) => {
+                      const cur = fd.filtrazione_microporica || [];
+                      const next = v ? [...cur, o.v] : cur.filter((x) => x !== o.v);
+                      sf("filtrazione_microporica")(next);
+                    }}
+                    data-testid={`micro-${o.v}`}
+                  />
+                  {o.l}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Dosatore coadiuvante (post filtrazione)</Label>
           <div className="flex items-center gap-6 flex-wrap">
             <SiNo name="dosatore" value={fd.dosatore_coadiuvante} onChange={sf("dosatore_coadiuvante")} />
             <div className="flex items-center gap-2">
@@ -447,113 +506,84 @@ export default function Imbottigliamento() {
               <Input className="w-40" value={fd.dosaggio} onChange={(e) => sf("dosaggio")(e.target.value)} placeholder="es. 20 g/hl" />
             </div>
           </div>
-        </LabeledRow>
+        </div>
       </SectionCard>
 
-      {/* BOTTIGLIA */}
-      <SectionCard title="Bottiglia">
-        <LabeledRow label="Capacità bottiglia">
-          <Select value={String(form.bottle_capacity_l)} onValueChange={(v) => setForm({ ...form, bottle_capacity_l: v })}>
-            <SelectTrigger data-testid="bottle-capacity" className="max-w-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {CAPACITIES.map((c) => <SelectItem key={c} value={String(c)}>{c.toFixed(2)} L</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </LabeledRow>
-        <LabeledRow label="Bottiglia — fornita da">
-          <Input value={fd.bottiglia_fornita_da} onChange={(e) => sf("bottiglia_fornita_da")(e.target.value)} />
-        </LabeledRow>
-        <LabeledRow label="Chiusura — fornita da">
-          <Input value={fd.chiusura_fornita_da} onChange={(e) => sf("chiusura_fornita_da")(e.target.value)} />
-        </LabeledRow>
-        <LabeledRow label="Gabbietta — fornita da">
-          <Input value={fd.gabbietta_fornita_da} onChange={(e) => sf("gabbietta_fornita_da")(e.target.value)} />
-        </LabeledRow>
-        <LabeledRow label="Capsula — fornita da">
-          <Input value={fd.capsula_fornita_da} onChange={(e) => sf("capsula_fornita_da")(e.target.value)} />
-        </LabeledRow>
+      {/* BOTTIGLIA — 5 righe con spunta + magazzino/manuale + fornita da */}
+      <SectionCard title="Bottiglia e chiusure">
+        <div className="grid grid-cols-[20px_140px_1fr_1fr_120px] gap-3 text-[11px] uppercase tracking-widest text-stone-500 pb-1 border-b border-stone-200">
+          <div></div><div>Componente</div><div>Articolo</div><div>Fornita da</div><div></div>
+        </div>
+        <ComponentRow label="Bottiglia" cmp={fd.bottiglia} onChange={setCmp("bottiglia")}
+          options={optBottles.length ? optBottles : optAll} autoFillSupplier={supplierIsBarbon} />
+        <ComponentRow label="Tappo" cmp={fd.tappo} onChange={setCmp("tappo")}
+          options={optTappi.length ? optTappi : optAll} autoFillSupplier={supplierIsBarbon} />
+        <ComponentRow label="Chiusura" cmp={fd.chiusura} onChange={setCmp("chiusura")}
+          options={optTappi.length ? optTappi : optAll} autoFillSupplier={supplierIsBarbon} />
+        <ComponentRow label="Gabbietta" cmp={fd.gabbietta} onChange={setCmp("gabbietta")}
+          options={optAll} autoFillSupplier={supplierIsBarbon} />
+        <ComponentRow label="Capsula" cmp={fd.capsula} onChange={setCmp("capsula")}
+          options={optCaps.length ? optCaps : optAll} autoFillSupplier={supplierIsBarbon} />
       </SectionCard>
 
-      {/* ETICHETTATURA */}
+      {/* ETICHETTATURA — spunta + magazzino/manuale + fornita da + quantità (auto bottle_count) */}
       <SectionCard title="Etichettatura">
-        {[
-          ["Fronte", "etichetta_fronte", "etichetta_fronte_fornita_da"],
-          ["Retro", "etichetta_retro", "etichetta_retro_fornita_da"],
-          ["Fascetta", "fascetta", "fascetta_fornita_da"],
-        ].map(([lbl, kBool, kText]) => (
-          <LabeledRow key={kBool} label={lbl}>
-            <div className="flex items-center gap-6 flex-wrap">
-              <SiNo name={kBool} value={fd[kBool]} onChange={sf(kBool)} />
-              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                <Label className="text-sm text-stone-600">Fornita da</Label>
-                <Input value={fd[kText]} onChange={(e) => sf(kText)(e.target.value)} />
-              </div>
-            </div>
-          </LabeledRow>
-        ))}
-        <LabeledRow label="Centratura ottica">
+        <div className="grid grid-cols-[20px_140px_1fr_1fr_120px] gap-3 text-[11px] uppercase tracking-widest text-stone-500 pb-1 border-b border-stone-200">
+          <div></div><div>Componente</div><div>Articolo</div><div>Fornita da</div><div>Quantità</div>
+        </div>
+        <div className="text-[11px] text-stone-500 -mb-2">Quantità suggerita automatica: <b>{bottleQty}</b> (= Tot bottiglie). Modificabile.</div>
+        <ComponentRow label="Fronte" cmp={fd.etichetta_fronte} onChange={setCmp("etichetta_fronte")}
+          options={optLabels.length ? optLabels : optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={bottleQty} />
+        <ComponentRow label="Retro" cmp={fd.etichetta_retro} onChange={setCmp("etichetta_retro")}
+          options={optLabels.length ? optLabels : optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={bottleQty} />
+        <ComponentRow label="Fascetta" cmp={fd.fascetta} onChange={setCmp("fascetta")}
+          options={optLabels.length ? optLabels : optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={bottleQty} />
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3 pt-3 border-t border-stone-100">
+          <Label>Centratura ottica</Label>
           <SiNo name="centratura" value={fd.centratura_ottica} onChange={sf("centratura_ottica")} />
-        </LabeledRow>
+        </div>
       </SectionCard>
 
       {/* CONFEZIONAMENTO */}
       <SectionCard title="Confezionamento">
-        <LabeledRow label="Cartone — formato da">
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Cartone — formato da</Label>
           <div className="flex items-center gap-6 flex-wrap">
             <RadioGroup className="flex items-center gap-5" value={String(form.carton_size)} onValueChange={(v) => setForm({ ...form, carton_size: v })}>
               {CARTON_SIZES.map((c) => (
                 <label key={c} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                  <RadioGroupItem value={String(c)} data-testid={`carton-${c}`} />
-                  {c}BT
+                  <RadioGroupItem value={String(c)} /> {c}BT
                 </label>
               ))}
             </RadioGroup>
-            <div className="text-sm text-stone-500">Suggerimento: {suggestedCartons} cartoni</div>
+            <div className="text-sm text-stone-500">Suggerimento: <b>{suggestedCartons}</b> cartoni</div>
           </div>
-        </LabeledRow>
-        <LabeledRow label="Cartone — fornita da">
-          <div className="grid md:grid-cols-[1fr_200px] gap-3">
-            <Input value={fd.cartone_fornita_da} onChange={(e) => sf("cartone_fornita_da")(e.target.value)} />
-            <div>
-              <Label className="text-[11px] text-stone-500">Quantità cartoni</Label>
-              <Input type="number" min="0" value={form.carton_count} onChange={(e) => setForm({ ...form, carton_count: e.target.value })} data-testid="carton-count" />
-            </div>
-          </div>
-        </LabeledRow>
-        <LabeledRow label="Alveare/divisorio">
-          <div className="flex items-center gap-6 flex-wrap">
-            <SiNo name="alveare" value={fd.alveare_divisorio} onChange={sf("alveare_divisorio")} />
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <Label className="text-sm text-stone-600">Fornita da</Label>
-              <Input value={fd.alveare_fornita_da} onChange={(e) => sf("alveare_fornita_da")(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="text-sm text-stone-600">Quantità</Label>
-              <Input className="w-28" type="number" value={fd.alveare_quantita} onChange={(e) => sf("alveare_quantita")(e.target.value)} />
-            </div>
-          </div>
-        </LabeledRow>
-        <LabeledRow label="Etichetta su cartone">
-          <div className="flex items-center gap-6 flex-wrap">
-            <SiNo name="etcart" value={fd.etichetta_cartone} onChange={sf("etichetta_cartone")} />
-            <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-              <Label className="text-sm text-stone-600">Fornita da</Label>
-              <Input value={fd.etichetta_cartone_fornita_da} onChange={(e) => sf("etichetta_cartone_fornita_da")(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="text-sm text-stone-600">Quantità</Label>
-              <Input className="w-28" type="number" value={fd.etichetta_cartone_quantita} onChange={(e) => sf("etichetta_cartone_quantita")(e.target.value)} />
-            </div>
-          </div>
-        </LabeledRow>
-        <LabeledRow label="Nastratrice">
+        </div>
+        <div className="grid grid-cols-[20px_140px_1fr_1fr_120px] gap-3 text-[11px] uppercase tracking-widest text-stone-500 pb-1 border-b border-stone-200 pt-2">
+          <div></div><div>Componente</div><div>Articolo</div><div>Fornita da</div><div>Quantità</div>
+        </div>
+        <ComponentRow label="Cartone" cmp={fd.cartone} onChange={setCmp("cartone")}
+          options={optCartons.length ? optCartons : optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={suggestedCartons} />
+        <ComponentRow label="Alveare/divisorio" cmp={fd.alveare} onChange={setCmp("alveare")}
+          options={optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={suggestedCartons} />
+        <ComponentRow label="Etichetta su cartone" cmp={fd.etichetta_cartone} onChange={setCmp("etichetta_cartone")}
+          options={optLabels.length ? optLabels : optAll} autoFillSupplier={supplierIsBarbon}
+          showQty autoQty={suggestedCartons} />
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3 pt-3 border-t border-stone-100">
+          <Label>Nastratrice</Label>
           <SiNo name="nastratrice" value={fd.nastratrice} onChange={sf("nastratrice")} />
-        </LabeledRow>
+        </div>
       </SectionCard>
 
       {/* PALETTE */}
       <SectionCard title="Palette">
-        <LabeledRow label="Palette">
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Palette</Label>
           <div className="flex items-center gap-6 flex-wrap">
             <SiNo name="palette" value={fd.palette} onChange={sf("palette")} />
             <div className="flex items-center gap-2">
@@ -565,38 +595,32 @@ export default function Imbottigliamento() {
               <Input value={fd.palette_fornita_da} onChange={(e) => sf("palette_fornita_da")(e.target.value)} />
             </div>
           </div>
-        </LabeledRow>
-        <LabeledRow label="Tipologia">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Tipologia</Label>
           <RadioGroup className="flex items-center gap-5 flex-wrap" value={fd.palette_tipo} onValueChange={sf("palette_tipo")}>
-            {[
-              ["epal_80x120", "Epal 80x120"],
-              ["pallet_80x120", "Pallet 80x120"],
-              ["pallet_100x120", "Pallet 100x120"],
-            ].map(([v, l]) => (
+            {[["epal_80x120","Epal 80x120"],["pallet_80x120","Pallet 80x120"],["pallet_100x120","Pallet 100x120"]].map(([v, l]) => (
               <label key={v} className="flex items-center gap-1.5 text-sm cursor-pointer">
-                <RadioGroupItem value={v} />
-                {l}
+                <RadioGroupItem value={v} /> {l}
               </label>
             ))}
           </RadioGroup>
-        </LabeledRow>
-        <LabeledRow label="Totali">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-start gap-3">
+          <Label className="pt-2">Totali</Label>
           <div className="grid grid-cols-2 gap-3 max-w-md">
-            <div>
-              <Label className="text-[11px] text-stone-500">tot pallet</Label>
-              <Input type="number" value={fd.palette_tot} onChange={(e) => sf("palette_tot")(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-[11px] text-stone-500">sc/pallet</Label>
-              <Input type="number" value={fd.palette_sc_per} onChange={(e) => sf("palette_sc_per")(e.target.value)} />
-            </div>
+            <div><Label className="text-[11px] text-stone-500">tot pallet</Label>
+              <Input type="number" value={fd.palette_tot} onChange={(e) => sf("palette_tot")(e.target.value)} /></div>
+            <div><Label className="text-[11px] text-stone-500">sc/pallet</Label>
+              <Input type="number" value={fd.palette_sc_per} onChange={(e) => sf("palette_sc_per")(e.target.value)} /></div>
           </div>
-        </LabeledRow>
+        </div>
       </SectionCard>
 
       {/* CESTONI */}
       <SectionCard title="Cestoni">
-        <LabeledRow label="Cestoni">
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Cestoni</Label>
           <div className="flex items-center gap-6 flex-wrap">
             <SiNo name="cestoni" value={fd.cestoni} onChange={sf("cestoni")} />
             <div className="flex items-center gap-2">
@@ -608,36 +632,32 @@ export default function Imbottigliamento() {
               <Input value={fd.cestoni_fornita_da} onChange={(e) => sf("cestoni_fornita_da")(e.target.value)} />
             </div>
           </div>
-        </LabeledRow>
-        <LabeledRow label="Tipologia">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Tipologia</Label>
           <RadioGroup className="flex items-center gap-5 flex-wrap" value={fd.cestone_tipo} onValueChange={sf("cestone_tipo")}>
-            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-              <RadioGroupItem value="cestone_epal" /> Cestone + Epal 80x120
-            </label>
-            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-              <RadioGroupItem value="cestone_normale" /> Cestone normale
-            </label>
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer"><RadioGroupItem value="cestone_epal" /> Cestone + Epal 80x120</label>
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer"><RadioGroupItem value="cestone_normale" /> Cestone normale</label>
           </RadioGroup>
-        </LabeledRow>
-        <LabeledRow label="Piani">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Piani</Label>
           <RadioGroup className="flex items-center gap-5" value={String(fd.cestone_piani || "")} onValueChange={(v) => sf("cestone_piani")(Number(v))}>
             <label className="flex items-center gap-1.5 text-sm cursor-pointer"><RadioGroupItem value="2" /> 2 piani</label>
             <label className="flex items-center gap-1.5 text-sm cursor-pointer"><RadioGroupItem value="3" /> 3 piani</label>
           </RadioGroup>
-        </LabeledRow>
-        <LabeledRow label="Totali">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-start gap-3">
+          <Label className="pt-2">Totali</Label>
           <div className="grid grid-cols-2 gap-3 max-w-md">
-            <div>
-              <Label className="text-[11px] text-stone-500">tot cestoni</Label>
-              <Input type="number" value={fd.cestone_tot} onChange={(e) => sf("cestone_tot")(e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-[11px] text-stone-500">bt/cestone</Label>
-              <Input type="number" value={fd.cestone_bt_per} onChange={(e) => sf("cestone_bt_per")(e.target.value)} />
-            </div>
+            <div><Label className="text-[11px] text-stone-500">tot cestoni</Label>
+              <Input type="number" value={fd.cestone_tot} onChange={(e) => sf("cestone_tot")(e.target.value)} /></div>
+            <div><Label className="text-[11px] text-stone-500">bt/cestone</Label>
+              <Input type="number" value={fd.cestone_bt_per} onChange={(e) => sf("cestone_bt_per")(e.target.value)} /></div>
           </div>
-        </LabeledRow>
-        <LabeledRow label="Falde pvc">
+        </div>
+        <div className="grid md:grid-cols-[180px_1fr] items-center gap-3">
+          <Label>Falde pvc</Label>
           <div className="flex items-center gap-6 flex-wrap">
             <SiNo name="falde" value={fd.falde_pvc} onChange={sf("falde_pvc")} />
             <div className="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -649,79 +669,12 @@ export default function Imbottigliamento() {
               <Input className="w-28" type="number" value={fd.falde_pvc_quantita} onChange={(e) => sf("falde_pvc_quantita")(e.target.value)} />
             </div>
           </div>
-        </LabeledRow>
+        </div>
       </SectionCard>
 
-      {/* NOTE */}
       <SectionCard title="Note">
         <Textarea rows={4} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Osservazioni di produzione…" />
       </SectionCard>
-
-      {/* MATERIALE DEDOTTO DAL MAGAZZINO */}
-      <Card className="card-elevated">
-        <CardContent className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-serif-display text-xl">Materiale detratto dal magazzino</div>
-              <div className="text-xs text-stone-500">Indica le quantità effettive consumate per questo imbottigliamento.</div>
-            </div>
-            <Button variant="outline" onClick={applySuggestions} data-testid="apply-suggestions">
-              <Plus className="w-4 h-4 mr-2" /> Applica suggerimenti
-            </Button>
-          </div>
-
-          {form.supplier === "cliente" && (
-            <div className="flex items-start gap-2 bg-sky-50 border border-sky-200 text-sky-900 rounded-md px-3 py-2 text-sm">
-              <Info className="w-4 h-4 mt-0.5" />
-              Lavorazione conto terzi: nessuna detrazione dal magazzino Tenuta Barbon.
-            </div>
-          )}
-
-          <div className="space-y-5">
-            {Object.entries(byGroup).map(([gname, list]) => (
-              <div key={gname}>
-                <div className="text-xs uppercase tracking-widest text-stone-500 mb-2">{gname}</div>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Articolo</TableHead>
-                        <TableHead className="text-right">Scorta</TableHead>
-                        <TableHead className="text-right">Suggerimento</TableHead>
-                        <TableHead className="w-40">Quantità usata</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {list.map((it) => {
-                        const sug = suggestedFor(it);
-                        const used = materials[it.id] ?? "";
-                        const insufficient = form.supplier === "tenuta_barbon" && Number(used) > it.quantity;
-                        return (
-                          <TableRow key={it.id}>
-                            <TableCell className="font-medium">{it.name}</TableCell>
-                            <TableCell className="text-right font-mono-num">{it.quantity} {it.unit}</TableCell>
-                            <TableCell className="text-right font-mono-num text-stone-500">{sug > 0 ? sug : "—"}</TableCell>
-                            <TableCell>
-                              <Input
-                                type="number" min="0" value={used}
-                                onChange={(e) => setMat(it.id, e.target.value)}
-                                placeholder="0"
-                                className={insufficient ? "border-red-500" : ""}
-                                data-testid={`mat-input-${it.name}`}
-                              />
-                              {insufficient && <div className="text-[10px] text-red-600 mt-1">Scorta insufficiente</div>}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       <Card className="card-elevated">
         <CardContent className="p-5 flex items-center justify-between">

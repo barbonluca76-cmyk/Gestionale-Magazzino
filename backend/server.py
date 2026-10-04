@@ -485,25 +485,32 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
     # 1) Compute HL
     hl = round((data.bottle_count * data.bottle_capacity_l) / 100.0, 4)
 
-    # 2) Resolve finished item (existing or new lot)
+    # 2) Resolve finished item (existing or new lot — idempotent by name+group)
     finished_item_id = data.finished_item_id
     finished_name = data.wine_name
     if not finished_item_id:
         if not (data.new_lot_name and data.finished_group_id):
             raise HTTPException(status_code=400, detail="Specificare lotto esistente o nuovo lotto + gruppo")
-        new_doc = {
-            "group_id": data.finished_group_id,
-            "name": data.new_lot_name,
-            "quantity": 0,
-            "unit": "bott.",
-            "min_threshold": 0,
-            "bottle_capacity_l": data.bottle_capacity_l,
-            "notes": f"Creato da imbottigliamento",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        r = await db.finished_items.insert_one(new_doc)
-        finished_item_id = str(r.inserted_id)
-        finished_name = data.new_lot_name
+        existing = await db.finished_items.find_one({
+            "name": data.new_lot_name, "group_id": data.finished_group_id
+        })
+        if existing:
+            finished_item_id = str(existing["_id"])
+            finished_name = existing["name"]
+        else:
+            new_doc = {
+                "group_id": data.finished_group_id,
+                "name": data.new_lot_name,
+                "quantity": 0,
+                "unit": "bott.",
+                "min_threshold": 0,
+                "bottle_capacity_l": data.bottle_capacity_l,
+                "notes": "Creato da imbottigliamento",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            r = await db.finished_items.insert_one(new_doc)
+            finished_item_id = str(r.inserted_id)
+            finished_name = data.new_lot_name
 
     # 3) Credit finished product with bottles
     await db.finished_items.update_one(
@@ -634,24 +641,31 @@ async def update_bottling(bid: str, data: BottlingIn, admin: dict = Depends(requ
     # 1) Reverse the old inventory impact
     await _reverse_bottling_inventory(doc)
 
-    # 2) Resolve destination finished item (existing or new)
+    # 2) Resolve destination finished item (existing or new lot — idempotent)
     hl = round((data.bottle_count * data.bottle_capacity_l) / 100.0, 4)
     finished_item_id = data.finished_item_id
     finished_name = data.wine_name
     if not finished_item_id:
         if not (data.new_lot_name and data.finished_group_id):
             raise HTTPException(status_code=400, detail="Specificare lotto esistente o nuovo lotto + gruppo")
-        new_doc = {
-            "group_id": data.finished_group_id,
-            "name": data.new_lot_name,
-            "quantity": 0, "unit": "bott.", "min_threshold": 0,
-            "bottle_capacity_l": data.bottle_capacity_l,
-            "notes": "Creato da imbottigliamento (modifica)",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        r = await db.finished_items.insert_one(new_doc)
-        finished_item_id = str(r.inserted_id)
-        finished_name = data.new_lot_name
+        existing = await db.finished_items.find_one({
+            "name": data.new_lot_name, "group_id": data.finished_group_id
+        })
+        if existing:
+            finished_item_id = str(existing["_id"])
+            finished_name = existing["name"]
+        else:
+            new_doc = {
+                "group_id": data.finished_group_id,
+                "name": data.new_lot_name,
+                "quantity": 0, "unit": "bott.", "min_threshold": 0,
+                "bottle_capacity_l": data.bottle_capacity_l,
+                "notes": "Creato da imbottigliamento (modifica)",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            r = await db.finished_items.insert_one(new_doc)
+            finished_item_id = str(r.inserted_id)
+            finished_name = data.new_lot_name
 
     # 3) Credit new finished item
     await db.finished_items.update_one(
@@ -830,56 +844,64 @@ async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):
 
     # FILTRAZIONE
     tang = fd.get("filtrazione_tangenziale")
-    micro = fd.get("filtrazione_microporica", "")
+    micro = fd.get("filtrazione_microporica", [])
+    if isinstance(micro, str):
+        micro_list = [micro] if micro else []
+    else:
+        micro_list = list(micro or [])
     dos = fd.get("dosatore_coadiuvante")
     filt = [
         [f"Tangenziale   {_b(tang is True)} SI    {_b(tang is False)} NO",
-         f"Microporica   {_b(micro=='1')} 1 μm    {_b(micro=='0.65')} 0,65 μm    {_b(micro=='0.45')} 0,45 μm"],
+         f"Microporica   {_b('1' in micro_list)} 1 μm    {_b('0.65' in micro_list)} 0,65 μm    {_b('0.45' in micro_list)} 0,45 μm"],
         [f"Dosatore in linea di coadiuvante (post filtrazione)   {_b(dos is True)} SI    {_b(dos is False)} NO",
          f"Dosaggio: {fd.get('dosaggio', '')}"],
     ]
     story.append(section("Filtrazione", filt))
     story.append(Spacer(1, 6))
 
-    # BOTTIGLIA
-    bot = [
-        [f"Capacità bottiglia: {doc.get('bottle_capacity_l', 0)} L",
-         f"Bottiglia fornita da: {fd.get('bottiglia_fornita_da', '')}"],
-        [f"Chiusura fornita da: {fd.get('chiusura_fornita_da', '')}",
-         f"Gabbietta fornita da: {fd.get('gabbietta_fornita_da', '')}"],
-        [f"Capsula fornita da: {fd.get('capsula_fornita_da', '')}", ""],
-    ]
-    story.append(section("Bottiglia", bot))
+    # BOTTIGLIA (5 righe: Bottiglia, Tappo, Chiusura, Gabbietta, Capsula)
+    def _row_text(key_prefix):
+        cmp = fd.get(key_prefix) if isinstance(fd.get(key_prefix), dict) else {}
+        used = "[X]" if cmp.get("used") else "[ ]"
+        art = (cmp.get("manual_name") if cmp.get("art_id") == "__manual__" else "") or fd.get(f"{key_prefix}_articolo", "")
+        forn = cmp.get("fornita_da") or fd.get(f"{key_prefix}_fornita_da", "")
+        qty = cmp.get("quantity") if cmp.get("quantity") not in (None, "") else fd.get(f"{key_prefix}_quantita", "")
+        return used, art, forn, qty
+
+    bot_rows = []
+    for key, label in [("bottiglia", "Bottiglia"), ("tappo", "Tappo"),
+                       ("chiusura", "Chiusura"), ("gabbietta", "Gabbietta"),
+                       ("capsula", "Capsula")]:
+        u, a, f_, _q = _row_text(key)
+        bot_rows.append([f"{u} {label}: {a}", f"Fornita da: {f_}"])
+    bot_rows.insert(0, [f"Capacità bottiglia: {doc.get('bottle_capacity_l', 0)} L", ""])
+    story.append(section("Bottiglia e chiusure", bot_rows))
     story.append(Spacer(1, 6))
 
-    # ETICHETTATURA
-    ef = fd.get("etichetta_fronte"); er = fd.get("etichetta_retro")
-    fa = fd.get("fascetta"); co = fd.get("centratura_ottica")
-    etic = [
-        [f"Fronte      {_b(ef is True)} SI    {_b(ef is False)} NO",
-         f"Fornita da: {fd.get('etichetta_fronte_fornita_da', '')}"],
-        [f"Retro       {_b(er is True)} SI    {_b(er is False)} NO",
-         f"Fornita da: {fd.get('etichetta_retro_fornita_da', '')}"],
-        [f"Fascetta    {_b(fa is True)} SI    {_b(fa is False)} NO",
-         f"Fornita da: {fd.get('fascetta_fornita_da', '')}"],
-        [f"Centratura ottica    {_b(co is True)} SI    {_b(co is False)} NO", ""],
-    ]
-    story.append(section("Etichettatura", etic))
+    # ETICHETTATURA (3 righe + Centratura ottica)
+    etic_rows = []
+    for key, label in [("etichetta_fronte", "Fronte"),
+                       ("etichetta_retro", "Retro"),
+                       ("fascetta", "Fascetta")]:
+        u, a, f_, q = _row_text(key)
+        etic_rows.append([f"{u} {label}: {a}", f"Fornita da: {f_}   Quantità: {q}"])
+    co = fd.get("centratura_ottica")
+    etic_rows.append([f"Centratura ottica    {_b(co is True)} SI    {_b(co is False)} NO", ""])
+    story.append(section("Etichettatura", etic_rows))
     story.append(Spacer(1, 6))
 
-    # CONFEZIONAMENTO
+    # CONFEZIONAMENTO (Cartone + Alveare + Etichetta su cartone + Nastratrice)
     cs = doc.get("carton_size", 0)
-    av = fd.get("alveare_divisorio"); ec = fd.get("etichetta_cartone"); na = fd.get("nastratrice")
-    conf = [
-        [f"Cartone — formato da   {_b(cs==6)} 6BT    {_b(cs==12)} 12BT    {_b(cs==24)} 24BT",
-         f"Fornita da: {fd.get('cartone_fornita_da', '')}   Quantità: {doc.get('carton_count', 0)}"],
-        [f"Alveare/divisorio   {_b(av is True)} SI    {_b(av is False)} NO",
-         f"Fornita da: {fd.get('alveare_fornita_da', '')}   Quantità: {fd.get('alveare_quantita', '')}"],
-        [f"Etichetta su cartone   {_b(ec is True)} SI    {_b(ec is False)} NO",
-         f"Fornita da: {fd.get('etichetta_cartone_fornita_da', '')}   Quantità: {fd.get('etichetta_cartone_quantita', '')}"],
-        [f"Nastratrice   {_b(na is True)} SI    {_b(na is False)} NO", ""],
-    ]
-    story.append(section("Confezionamento", conf))
+    na = fd.get("nastratrice")
+    conf_rows = [[f"Cartone formato   {_b(cs==6)} 6BT    {_b(cs==12)} 12BT    {_b(cs==24)} 24BT",
+                  f"Quantità cartoni: {doc.get('carton_count', 0)}"]]
+    for key, label in [("cartone", "Cartone"),
+                       ("alveare", "Alveare/divisorio"),
+                       ("etichetta_cartone", "Etichetta su cartone")]:
+        u, a, f_, q = _row_text(key)
+        conf_rows.append([f"{u} {label}: {a}", f"Fornita da: {f_}   Quantità: {q}"])
+    conf_rows.append([f"Nastratrice   {_b(na is True)} SI    {_b(na is False)} NO", ""])
+    story.append(section("Confezionamento", conf_rows))
     story.append(Spacer(1, 6))
 
     # PALETTE
