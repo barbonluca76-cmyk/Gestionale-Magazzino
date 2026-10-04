@@ -1,0 +1,45 @@
+{
+  "summary": "Backend first-finish test for Tenuta Barbon WMS. Auth, listing, dashboard, filtering, deletes, operator admin-rules, movements and PDF export all work. Bottling business logic is CORRECT server-side (HL math, raw-material decrement for tenuta_barbon, no-decrement + not_deducted flag for cliente, new-lot creation, finished-item credit). However every POST that returns a freshly created document (groups, raw-items, finished-items, bottling) responds with HTTP 500 because the handler returns the mongo doc without stripping the ObjectId `_id` field, causing FastAPI's jsonable_encoder to fail with 'ObjectId object is not iterable'. The record is actually persisted (verified via subsequent GET), so clients get a 500 while the data IS written - this will break frontend flows that rely on the response (e.g. getting the new id, closing modals, chaining bottling PDF download).",
+  "tested_scope": ["backend", "auth", "integration"],
+  "passed": [
+    "POST /api/auth/login returns token + user (admin role)",
+    "GET /api/auth/me with Bearer token",
+    "GET /api/dashboard/summary returns all 7 expected keys",
+    "GET /api/groups?kind=raw returns 5 seeded groups (Capsule, Bottiglie vuote, Etichette, Cartoni, Tappi)",
+    "GET /api/groups?kind=finished returns 4 seeded groups",
+    "GET /api/raw-items returns 16 seeded items and filters by group_id correctly",
+    "GET /api/finished-items returns 6 seeded lots",
+    "POST /api/raw-items/{id}/adjust works and updates quantity (needs quantity_delta + reason)",
+    "POST /api/finished-items/{id}/adjust works",
+    "Bottling business logic verified via GET /api/bottling: HL correct for 200x0.75=1.5, 100x0.75=0.75, 50x0.5=0.25",
+    "Bottling tenuta_barbon decrements listed raw materials by exact qty",
+    "Bottling cliente does NOT decrement raw materials; materials recorded with not_deducted=true",
+    "Bottling increments finished_item quantity by bottle_count (820->1020->1120 observed)",
+    "Bottling with new_lot_name + finished_group_id creates new finished lot and credits bottles",
+    "GET /api/bottling/{id}/pdf returns 200, content-type application/pdf, body starts with %PDF-1.4",
+    "GET /api/movements returns records and supports kind + operator_id filters",
+    "POST /api/auth/operators (admin) creates operator; non-admin receives 403",
+    "DELETE /api/auth/operators/{id} works; admin cannot delete self (400)",
+    "DELETE /api/raw-items/{id} and /api/finished-items/{id} work and log movements",
+    "Unauthenticated request to /api/dashboard/summary returns 401"
+  ],
+  "failed": [
+    {"area": "POST /api/groups", "issue": "Returns 500 Internal Server Error although group is inserted in DB", "evidence": "Backend log: TypeError: 'ObjectId' object is not iterable (fastapi.encoders.jsonable_encoder). Root cause: create_group returns `doc` which contains `_id` ObjectId set by pymongo's insert_one side effect; `id` is added but `_id` is never popped.", "priority": "HIGH"},
+    {"area": "POST /api/raw-items", "issue": "Returns 500 although raw item is inserted and movement logged", "evidence": "Same ObjectId serialization bug in create_raw at server.py ~L289-297. Response not strippable with .json().", "priority": "HIGH"},
+    {"area": "POST /api/finished-items", "issue": "Returns 500 although finished lot is inserted", "evidence": "Same ObjectId serialization bug in create_finished.", "priority": "HIGH"},
+    {"area": "POST /api/bottling", "issue": "Returns 500 although bottling is persisted and all inventory updates occur correctly", "evidence": "All three bottling attempts (tenuta_barbon, cliente, new_lot) returned 500 but GET /api/bottling shows them with correct hl values and materials[*].not_deducted flags. Same serialization bug - handler returns the mongo doc containing ObjectId _id.", "priority": "HIGH"},
+    {"area": "Response contract (all POST create endpoints)", "issue": "Frontend will not receive the new resource id/body, breaking modal close / chained PDF download / optimistic UI patterns.", "evidence": "4 of the main POST endpoints affected.", "priority": "HIGH"}
+  ],
+  "action_items": [
+    "In server.py, fix all POST create endpoints to strip the ObjectId before returning. Either call `serialize(doc)` (which pops `_id` and adds `id`) or build the response dict explicitly without `_id`. Affected: create_group (L257), create_raw (L289), create_finished (L341), create_bottling (L419). The simplest fix is to replace `return doc` with `return serialize(doc)` (and remove the manual `doc['id'] = ...` lines).",
+    "After fix, re-run backend tests; the business logic itself is sound so only response serialization needs attention."
+  ],
+  "success_rate": {"backend": "70%", "frontend": "not tested"},
+  "retest_needed": true,
+  "full_testing_deferred": true,
+  "schema_notes_for_main_agent": {
+    "StockAdjustIn": "fields are quantity_delta + reason (not delta/note)",
+    "FinishedItemIn": "bottle_capacity_l (not capacity_l)",
+    "BottlingIn": "requires wine_name, bottle_capacity_l, carton_size, carton_count (not capacity_l/pack_size)"
+  }
+}

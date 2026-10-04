@@ -259,6 +259,7 @@ async def create_group(data: GroupIn, user: dict = Depends(get_current_user)):
     doc = data.model_dump()
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.groups.insert_one(doc)
+    doc.pop("_id", None)
     doc["id"] = str(r.inserted_id)
     return doc
 
@@ -291,6 +292,7 @@ async def create_raw(data: RawItemIn, user: dict = Depends(get_current_user)):
     doc = data.model_dump()
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.raw_items.insert_one(doc)
+    doc.pop("_id", None)
     doc["id"] = str(r.inserted_id)
     await log_movement(user, "item_create", "raw", doc["id"], doc["name"],
                        doc["quantity"], "Creazione articolo")
@@ -343,6 +345,7 @@ async def create_finished(data: FinishedItemIn, user: dict = Depends(get_current
     doc = data.model_dump()
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.finished_items.insert_one(doc)
+    doc.pop("_id", None)
     doc["id"] = str(r.inserted_id)
     await log_movement(user, "item_create", "finished", doc["id"], doc["name"],
                        doc["quantity"], "Creazione lotto")
@@ -497,6 +500,7 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
     }
     r = await db.bottling_records.insert_one(record)
     record_id = str(r.inserted_id)
+    record.pop("_id", None)
     record["id"] = record_id
 
     # 6) Movement log
