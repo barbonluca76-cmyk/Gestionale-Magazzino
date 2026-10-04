@@ -8,7 +8,7 @@ import os
 import io
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict, Any
 
 import bcrypt
 import jwt
@@ -143,6 +143,7 @@ class BottlingIn(BaseModel):
     carton_count: int                        # editable
     materials: List[BottlingMaterial] = []   # all raw items used (editable)
     notes: Optional[str] = ""
+    form_data: Optional[Dict[str, Any]] = {}  # extended PDF-form fields
 
 # ---------- Helpers ----------
 def oid(s: str) -> ObjectId:
@@ -557,6 +558,7 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
         "carton_count": data.carton_count,
         "materials": materials_log,
         "notes": data.notes or "",
+        "form_data": data.form_data or {},
     }
     r = await db.bottling_records.insert_one(record)
     record_id = str(r.inserted_id)
@@ -700,6 +702,7 @@ async def update_bottling(bid: str, data: BottlingIn, admin: dict = Depends(requ
             "carton_count": data.carton_count,
             "materials": materials_log,
             "notes": data.notes or "",
+            "form_data": data.form_data or {},
             "edited_at": datetime.now(timezone.utc).isoformat(),
             "edited_by": admin.get("name", ""),
         }}
@@ -754,36 +757,176 @@ async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):
     except Exception:
         created_pretty = created
 
-    info = [
-        ["Data", created_pretty],
-        ["Operatore", doc.get("operator_name", "")],
-        ["Fornitore", "Tenuta Barbon" if doc.get("supplier") == "tenuta_barbon" else f"Cliente — {doc.get('client_name','')}"],
-        ["Prodotto", doc.get("wine_name", "")],
-        ["Bottiglie prodotte", str(doc.get("bottle_count", 0))],
-        ["Capacità bottiglia", f"{doc.get('bottle_capacity_l', 0)} L"],
-        ["Ettolitri utilizzati", f"{doc.get('hl', 0)} HL"],
-        ["Formato cartone", f"{doc.get('carton_size', 0)} bott."],
-        ["Cartoni utilizzati", str(doc.get("carton_count", 0))],
-    ]
-    t = Table(info, colWidths=[55*mm, 115*mm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#FAF7F2")),
-        ("TEXTCOLOR", (0, 0), (0, -1), muted),
-        ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 10),
-        ("FONT", (1, 0), (1, -1), "Helvetica", 10),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E7E5E4")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#E7E5E4")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    def _b(v):
+        return "[X]" if v else "[ ]"
+
+    fd = doc.get("form_data", {}) or {}
+    azienda = fd.get("azienda") or (doc.get("client_name") or ("Tenuta Barbon" if doc.get("supplier") == "tenuta_barbon" else ""))
+    data_lavoro = fd.get("data_lavoro") or created_pretty
+
+    # Header strip: C/ Lavoro Azienda | Data
+    ht = Table(
+        [[f"C/ LAVORO AZIENDA:  {azienda}", f"DATA:  {data_lavoro}"]],
+        colWidths=[115 * mm, 55 * mm],
+    )
+    ht.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica-Bold", 10),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D6D3D1")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E7E5E4")),
         ("LEFTPADDING", (0, 0), (-1, -1), 8),
         ("RIGHTPADDING", (0, 0), (-1, -1), 8),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TEXTCOLOR", (0, 0), (-1, -1), stone),
     ]))
-    story.append(t)
+    story.append(ht)
+    story.append(Spacer(1, 4))
 
-    story.append(Paragraph("Materiale di confezionamento", section_style))
+    story.append(Paragraph(
+        "<b>SPECIFICHE RIGUARDANTI LE MODALITÀ DELL'IMBOTTIGLIAMENTO E CONFEZIONAMENTO</b>",
+        ParagraphStyle("TitleCenter", parent=styles["Normal"], alignment=1,
+                       fontSize=10, textColor=stone, spaceAfter=8),
+    ))
+
+    partita = fd.get("partita_n") or ""
+    pt = Table([[f"PARTITA N°   {partita}"]], colWidths=[170 * mm])
+    pt.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica-Bold", 10),
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D6D3D1")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(pt)
+    story.append(Spacer(1, 6))
+
+    def section(title, rows, col_widths=None):
+        full = [[title] + [""] * ((len(rows[0]) if rows else 1) - 1)] + rows
+        cw = col_widths or [85 * mm, 85 * mm]
+        t = Table(full, colWidths=cw)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E7E5E4")),
+            ("SPAN", (0, 0), (-1, 0)),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 10),
+            ("FONT", (0, 1), (-1, -1), "Helvetica", 9),
+            ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#E7E5E4")),
+            ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#D6D3D1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return t
+
+    # CARATTERISTICHE
+    car = [
+        [f"Vino: {doc.get('wine_name', '')}", f"Annata: {fd.get('annata', '')}"],
+        [f"Tipologia: {fd.get('tipologia', '')}", f"N° lotto: {fd.get('numero_lotto', '')}"],
+        [f"Ettolitri: {doc.get('hl', 0)} HL", f"Tot bottiglie: {doc.get('bottle_count', 0)}"],
+    ]
+    story.append(section("Caratteristiche", car))
+    story.append(Spacer(1, 6))
+
+    # FILTRAZIONE
+    tang = fd.get("filtrazione_tangenziale")
+    micro = fd.get("filtrazione_microporica", "")
+    dos = fd.get("dosatore_coadiuvante")
+    filt = [
+        [f"Tangenziale   {_b(tang is True)} SI    {_b(tang is False)} NO",
+         f"Microporica   {_b(micro=='1')} 1 μm    {_b(micro=='0.65')} 0,65 μm    {_b(micro=='0.45')} 0,45 μm"],
+        [f"Dosatore in linea di coadiuvante (post filtrazione)   {_b(dos is True)} SI    {_b(dos is False)} NO",
+         f"Dosaggio: {fd.get('dosaggio', '')}"],
+    ]
+    story.append(section("Filtrazione", filt))
+    story.append(Spacer(1, 6))
+
+    # BOTTIGLIA
+    bot = [
+        [f"Capacità bottiglia: {doc.get('bottle_capacity_l', 0)} L",
+         f"Bottiglia fornita da: {fd.get('bottiglia_fornita_da', '')}"],
+        [f"Chiusura fornita da: {fd.get('chiusura_fornita_da', '')}",
+         f"Gabbietta fornita da: {fd.get('gabbietta_fornita_da', '')}"],
+        [f"Capsula fornita da: {fd.get('capsula_fornita_da', '')}", ""],
+    ]
+    story.append(section("Bottiglia", bot))
+    story.append(Spacer(1, 6))
+
+    # ETICHETTATURA
+    ef = fd.get("etichetta_fronte"); er = fd.get("etichetta_retro")
+    fa = fd.get("fascetta"); co = fd.get("centratura_ottica")
+    etic = [
+        [f"Fronte      {_b(ef is True)} SI    {_b(ef is False)} NO",
+         f"Fornita da: {fd.get('etichetta_fronte_fornita_da', '')}"],
+        [f"Retro       {_b(er is True)} SI    {_b(er is False)} NO",
+         f"Fornita da: {fd.get('etichetta_retro_fornita_da', '')}"],
+        [f"Fascetta    {_b(fa is True)} SI    {_b(fa is False)} NO",
+         f"Fornita da: {fd.get('fascetta_fornita_da', '')}"],
+        [f"Centratura ottica    {_b(co is True)} SI    {_b(co is False)} NO", ""],
+    ]
+    story.append(section("Etichettatura", etic))
+    story.append(Spacer(1, 6))
+
+    # CONFEZIONAMENTO
+    cs = doc.get("carton_size", 0)
+    av = fd.get("alveare_divisorio"); ec = fd.get("etichetta_cartone"); na = fd.get("nastratrice")
+    conf = [
+        [f"Cartone — formato da   {_b(cs==6)} 6BT    {_b(cs==12)} 12BT    {_b(cs==24)} 24BT",
+         f"Fornita da: {fd.get('cartone_fornita_da', '')}   Quantità: {doc.get('carton_count', 0)}"],
+        [f"Alveare/divisorio   {_b(av is True)} SI    {_b(av is False)} NO",
+         f"Fornita da: {fd.get('alveare_fornita_da', '')}   Quantità: {fd.get('alveare_quantita', '')}"],
+        [f"Etichetta su cartone   {_b(ec is True)} SI    {_b(ec is False)} NO",
+         f"Fornita da: {fd.get('etichetta_cartone_fornita_da', '')}   Quantità: {fd.get('etichetta_cartone_quantita', '')}"],
+        [f"Nastratrice   {_b(na is True)} SI    {_b(na is False)} NO", ""],
+    ]
+    story.append(section("Confezionamento", conf))
+    story.append(Spacer(1, 6))
+
+    # PALETTE
+    pal_on = fd.get("palette"); pt_type = fd.get("palette_tipo", "")
+    pal = [
+        [f"Palette   {_b(pal_on is True)} SI    {_b(pal_on is False)} NO",
+         f"Quantità totale: {fd.get('palette_quantita_tot', '')}    Fornita da: {fd.get('palette_fornita_da', '')}"],
+        [f"{_b(pt_type=='epal_80x120')} Epal 80x120   {_b(pt_type=='pallet_80x120')} Pallet 80x120   {_b(pt_type=='pallet_100x120')} Pallet 100x120",
+         f"tot pallet: {fd.get('palette_tot', '')}    sc/pallet: {fd.get('palette_sc_per', '')}"],
+    ]
+    story.append(section("Palette", pal))
+    story.append(Spacer(1, 6))
+
+    # CESTONI
+    ces_on = fd.get("cestoni"); ct_type = fd.get("cestone_tipo", "")
+    piani = fd.get("cestone_piani", 0); fpvc = fd.get("falde_pvc")
+    ces = [
+        [f"Cestoni   {_b(ces_on is True)} SI    {_b(ces_on is False)} NO",
+         f"Quantità: {fd.get('cestoni_quantita', '')}    Fornita da: {fd.get('cestoni_fornita_da', '')}"],
+        [f"{_b(ct_type=='cestone_epal')} Cestone + Epal 80x120    {_b(ct_type=='cestone_normale')} Cestone normale",
+         f"{_b(piani==2)} 2 piani     {_b(piani==3)} 3 piani"],
+        [f"tot cestoni: {fd.get('cestone_tot', '')}", f"bt/cestone: {fd.get('cestone_bt_per', '')}"],
+        [f"Falde pvc   {_b(fpvc is True)} SI    {_b(fpvc is False)} NO",
+         f"Fornita da: {fd.get('falde_pvc_fornita_da', '')}    Quantità: {fd.get('falde_pvc_quantita', '')}"],
+    ]
+    story.append(section("Cestoni", ces))
+    story.append(Spacer(1, 8))
+
+    # Operatore
+    op_row = Table([[f"Operatore: {doc.get('operator_name', '')}",
+                     f"Fornitore principale: {'Tenuta Barbon' if doc.get('supplier')=='tenuta_barbon' else f'Cliente — {doc.get(chr(39)+chr(39)) or doc.get(chr(39)+chr(39),chr(39)+chr(39))}'}"]],
+                   colWidths=[85 * mm, 85 * mm])
+    op_row = Table([[f"Operatore: {doc.get('operator_name', '')}",
+                     f"Fornitore principale: {'Tenuta Barbon' if doc.get('supplier')=='tenuta_barbon' else 'Cliente — ' + (doc.get('client_name') or '')}"]],
+                   colWidths=[85 * mm, 85 * mm])
+    op_row.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+        ("TEXTCOLOR", (0, 0), (-1, -1), muted),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(op_row)
+
+    # Materiale detratto dal magazzino
     mats = doc.get("materials", []) or []
     if mats:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("Materiale detratto dal magazzino", section_style))
         rows = [["Articolo", "Quantità", "Note"]]
         for m in mats:
             rows.append([
@@ -791,23 +934,21 @@ async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):
                 str(m.get("quantity", 0)),
                 "Non detratto (cliente)" if m.get("not_deducted") else "Detratto dal magazzino",
             ])
-        mt = Table(rows, colWidths=[80*mm, 30*mm, 60*mm])
+        mt = Table(rows, colWidths=[90 * mm, 25 * mm, 55 * mm])
         mt.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), burgundy),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 10),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
             ("FONT", (0, 1), (-1, -1), "Helvetica", 9),
             ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#E7E5E4")),
             ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#E7E5E4")),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 6),
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(mt)
-    else:
-        story.append(Paragraph("Nessun materiale registrato.", body_style))
 
     if doc.get("notes"):
         story.append(Paragraph("Note", section_style))
