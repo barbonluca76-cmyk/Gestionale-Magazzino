@@ -1,0 +1,126 @@
+{
+  "project_name": "Tenuta Barbon - Sistema Gestione Magazzino Vinicolo",
+  "app_type": "dashboard / internal_tool / warehouse_management_system",
+  "target_devices": "PC e Tablet (Layout touch-friendly e responsive)",
+  "language": "Italian",
+  "identity_and_theme": {
+    "theme_mode": "Light Warm Cellar / Organic Earthy Luxury",
+    "primary_emotion": "Precisione artigianale, prestigio enologico, operatività fluida e chiara",
+    "archetype": "ARCHETYPE 1: Organic & Earthy meets Swiss Precision",
+    "design_principles": [
+      "Calore enologico con finitura tattile: sfondo alabastro/sabbia calda anziché bianco ospedaliero",
+      "Gerarchia visiva ad alto contrasto per ambienti cantina e tablet ad alta ed bassa luminosità",
+      "Chiarezza matematica nei calcoli automatici (ettolitri, cartoni, materiali)",
+      "Logica condizionale evidente per il vincolo aziendale (Fornitore = Tenuta Barbon vs Cliente Esterno)"
+    ]
+  },
+  "typography": {
+    "font_family_heading": "Cormorant Garamond, Playfair Display, serif",
+    "font_family_body": "Plus Jakarta Sans, Manrope, sans-serif",
+    "font_family_mono": "JetBrains Mono, monospace",
+    "scale": {
+      "h1": "text-3xl sm:text-4xl font-serif font-bold tracking-tight text-stone-900",
+      "h2": "text-xl sm:text-2xl font-serif font-semibold text-stone-800",
+      "h3": "text-lg font-sans font-semibold text-stone-800",
+      "body": "text-sm sm:text-base font-sans text-stone-700 leading-relaxed",
+      "caption_mono": "text-xs font-mono tracking-wide text-stone-500 uppercase",
+      "kpi_value": "text-3xl sm:text-4xl font-mono font-bold text-stone-900"
+    }
+  },
+  "colors": {
+    "background_main": "#FAF7F2",
+    "background_card": "#FFFFFF",
+    "background_sidebar": "#1C1917",
+    "text_primary": "#1C1917",
+    "text_secondary": "#57534E",
+    "text_muted": "#78716C",
+    "brand_burgundy": "#6B1D2F",
+    "brand_burgundy_hover": "#541624",
+    "brand_amber_gold": "#B45309",
+    "brand_sage_green": "#3F6212",
+    "alert_amber_bg": "#FEF3C7",
+    "alert_amber_border": "#F59E0B",
+    "alert_amber_text": "#92400E",
+    "status_success_bg": "#ECFDF5",
+    "status_success_text": "#065F46",
+    "border_subtle": "#E7E5E4",
+    "border_strong": "#D6D3D1"
+  },
+  "image_urls": [
+    {
+      "category": "winery_bottles",
+      "url": "https://images.unsplash.com/photo-1618412063173-1a3d5e836d9b?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "description": "Bottiglie di vino in cantina con etichette chiare"
+    },
+    {
+      "category": "wine_bottle_single",
+      "url": "https://images.unsplash.com/photo-1742672628858-f53a251aa5c1?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "description": "Bottiglia di vino toscano premium"
+    },
+    {
+      "category": "cellar_stack",
+      "url": "https://images.unsplash.com/photo-1642169791287-ca59eaf67059?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "description": "Partite di bottiglie stoccate in cantina"
+    },
+    {
+      "category": "estate_vineyard",
+      "url": "https://images.unsplash.com/photo-1645693091574-1b31ea5ccbc6?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "description": "Tenuta e vigneti di Tenuta Barbon"
+    }
+  ],
+  "layout_and_components": {
+    "sidebar": {
+      "style": "Dark Charcoal (#1C1917) accentuato da dettagli Borgogna (#6B1D2F) e stemma Tenuta Barbon",
+      "navigation_items": [
+        "Dashboard KPI & Avvisi",
+        "Materie Prime (Capsule, Bottiglie, Etichette, Cartoni)",
+        "Prodotti Finiti (Vini & Lotti)",
+        "Modulo Imbottigliamento",
+        "Registro Movimenti & Storico",
+        "Operatori & Impostazioni"
+      ],
+      "operator_badge": "Avatar operatore attivo con selettore rapido cambio turno/operatore"
+    },
+    "dashboard_kpis": [
+      "Ettolitri Totali in Serbatoi/Botti (HL)",
+      "Bottiglie Pronta Consegna (Unità)",
+      "Scorte Materie Prime in Scadenza/Esaurimento (Conteggio Alert)",
+      "Movimenti Imbottigliamento Mese Corrente"
+    ],
+    "alert_popup_system": {
+      "type": "Modal Dialog & Persistent Top Banner for Low Stock",
+      "trigger": "All'accesso o click su campanella avvisi se giacenza < soglia_minima",
+      "features": "Lista materie prime sottosoglia con pulsante azione rapida Ordina/Rifornisci"
+    },
+    "bottling_module_calculator": {
+      "bottle_capacities": [0.20, 0.35, 0.50, 0.75, 1.50, 3.00],
+      "carton_sizes": [6, 12, 24],
+      "automatic_formulas": {
+        "ettolitri": "Ettolitri (HL) = (Numero Bottiglie * Capacità Litri) / 100",
+        "cartoni": "Cartoni Necessari = Math.ceil(Numero Bottiglie / Capacità Cartone)"
+      },
+      "rule_tenuta_barbon": {
+        "rule_description": "Le quantità di materie prime (bottiglie vuote, etichette, capsule, cartoni) vengono sottratte dal magazzino SOLO SE il fornitore selezionato è 'Tenuta Barbon'. Se è selezionato 'Conto Terzi / Cliente', appare badge informativo blu 'Lavorazione Conto Terzi: nessuna detrazione scorte Tenuta Barbon'."
+      },
+      "pdf_export": "Pulsante Genera & Scarica PDF Riepilogativo Imbottigliamento con dati lotto, operatore, materiale consumato e firma"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Sviluppare un'interfaccia interamente in lingua ITALIANA curata nei minimi dettagli per 'Tenuta Barbon'.",
+    "Utilizzare mock state in React con localStorage o stato locale robusto per consentire test completi senza backend (inserimento, modifica, eliminazione, filtri e scarico PDF simulated/real html2canvas/jspdf).",
+    "Assicurarsi che le tabelle abbiano filtri per ricerca testo, macrogruppi, operatore e range di date.",
+    "Aggiungere sempre 'data-testid' su tutti i pulsanti, form, input, badge e righe di tabelle per la suite di test automatizzata.",
+    "Nel form di imbottigliamento, ricalcolare ISTANTANEAMENTE gli ettolitri, i cartoni e il fabbisogno di materie prime ad ogni modifica di numero bottiglie o formato.",
+    "Evidenziare chiaramente quando il fornitore è 'Tenuta Barbon' vs 'Cliente Esterno / Conto Terzi' mediante alert visivi dinamici nel form.",
+    "Implementare il popup automatico delle scorte in esaurimento (Dialog shadcn/ui) all'avvio della dashboard se sono presenti articoli sotto la soglia minima.",
+    "Fornire una modale con vista anteprima e stampa/download del Report PDF di Imbottigliamento."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Non usare stili Vercel/Stripe impersonali o sfondi bianchi sterili; preferire sfondi sabbia tenue (#FAF7F2) e dettagli bordeaux bordeaux (#6B1D2F).",
+    "Usare font Serif raffinati per i titoli e San-serif leggeri/chiari per i dati tecnici.",
+    "I pulsanti devono possedere micro-interazioni (hover, focus ring, attrazione visiva sui CTA primari).",
+    "Tutti gli elementi interattivi devono avere l'attributo data-testid in kebab-case (es. data-testid='bottling-submit-button').",
+    "Garantire piena reattività per tablet e schermi touch screen (padding generosi, bottoni ampi min h-11)."
+  ]
+},
+overwrite:true,path:

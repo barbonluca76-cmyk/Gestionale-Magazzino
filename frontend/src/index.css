@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+body {
+  margin: 0;
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #FAF7F2;
+  color: #1C1917;
+}
+
+.font-serif-display {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  letter-spacing: -0.01em;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-feature-settings: 'tnum';
+}
+
+@layer base {
+  :root {
+    --background: 36 38% 97%;
+    --foreground: 24 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 24 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 10% 10%;
+    --primary: 348 58% 27%;
+    --primary-foreground: 36 38% 97%;
+    --secondary: 30 20% 94%;
+    --secondary-foreground: 24 10% 15%;
+    --muted: 30 15% 95%;
+    --muted-foreground: 25 6% 46%;
+    --accent: 30 20% 92%;
+    --accent-foreground: 24 10% 15%;
+    --destructive: 0 72% 42%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 30 10% 90%;
+    --input: 30 10% 90%;
+    --ring: 348 58% 27%;
+    --chart-1: 348 58% 27%;
+    --chart-2: 30 85% 38%;
+    --chart-3: 83 60% 25%;
+    --chart-4: 24 6% 46%;
+    --chart-5: 36 38% 70%;
+    --radius: 0.65rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Subtle grain texture for depth */
+.bg-grain {
+  background-color: #FAF7F2;
+  background-image:
+    radial-gradient(ellipse at top left, rgba(107, 29, 47, 0.04), transparent 55%),
+    radial-gradient(ellipse at bottom right, rgba(180, 83, 9, 0.04), transparent 55%);
+}
+
+/* Elegant button hover ripple */
+.btn-wine {
+  background-color: #6B1D2F;
+  color: #FAF7F2;
+  transition: background-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+.btn-wine:hover {
+  background-color: #541624;
+  box-shadow: 0 6px 20px -8px rgba(107, 29, 47, 0.45);
+}
+.btn-wine:active { transform: translateY(1px); }
+
+/* Sidebar active item */
+.nav-active {
+  background: linear-gradient(90deg, rgba(107,29,47,0.9), rgba(107,29,47,0.6));
+  color: #FAF7F2;
+}
+
+.card-elevated {
+  background: #FFFFFF;
+  border: 1px solid #E7E5E4;
+  box-shadow: 0 1px 2px rgba(28,25,23,0.04), 0 8px 24px -16px rgba(28,25,23,0.08);
+}
+
+[data-debug-wrapper="true"] { display: contents !important; }
