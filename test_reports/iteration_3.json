@@ -1,0 +1,33 @@
+{
+  "summary": "Tested new barcode scan feature on backend (GET /api/scan/{code}, POST /api/scan/adjust) plus barcode field persistence on raw-items and finished-items. 12/12 tests pass against public URL. All scenarios in the review request verified: raw lookup, finished lookup, 404 with Italian message, positive/negative adjust, finished adjust, 404 on unknown, 401 unauthenticated for both endpoints, movement logged with 'Scan —' prefix, and barcode persistence on POST + GET of raw and finished items.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scan_barcode.py",
+    "/app/test_reports/pytest/scan_barcode_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is approaching 800 lines — consider splitting routers (scan, bottling, auth) into modules for maintainability.",
+    "POST /scan/adjust allows negative deltas that could push quantity below 0; no guard for negative stock. Consider validating final quantity >= 0 or at least returning a warning.",
+    "ScanAdjustIn.quantity_delta has no bounds; a user error could overwrite stock drastically. Consider adding Field(gt=-100000, lt=100000) or similar sanity bounds.",
+    "Code trimming is done on GET but detail message in POST /scan/adjust uses the trimmed code only in 404 path — minor consistency; also code is not validated for empty string in POST (returns 404 instead of 400)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_scan_barcode.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "Admin barbonluca76@gmail.com / Barbon2026! — login works, Bearer token returned.",
+  "seed_data_creation": "Tests create one temporary raw item + one temporary finished item with TEST_ prefix and auto-delete at the end. Also increments quantities on seeded barcodes BOT-075-VERDE (+5), BOT-075-BIANCA (-3), BOT-075-RENANA (+1), WINE-CAB-2022-A (+2) — these are not reverted.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Scan endpoints and barcode fields are fully functional. Test file at /app/backend/tests/test_scan_barcode.py is reusable. Note movements collection field is 'kind' (not 'type'). Seeded barcodes list is in review request. Known: no negative-stock guard on scan/adjust.",
+  "rca of the issue": "N/A — all tests pass. One initial test failure was a test-side selector bug (used m['type'] instead of m['kind']); fixed in test file."
+}
