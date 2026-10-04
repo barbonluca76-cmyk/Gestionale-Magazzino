@@ -1,25 +1,32 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { api, formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Grape } from "lucide-react";
+import { Grape, Briefcase, Hammer, User } from "lucide-react";
+import { toast } from "sonner";
 
 export default function Login() {
   const { user, login, error } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [operators, setOperators] = useState([]);
+  const [loading, setLoading] = useState(null);
 
   useEffect(() => { if (user) navigate("/"); }, [user, navigate]);
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    const ok = await login(email, password);
-    setLoading(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get("/auth/operators-list");
+        setOperators(data);
+      } catch (e) { toast.error(formatApiError(e)); }
+    })();
+  }, []);
+
+  const choose = async (op) => {
+    setLoading(op.id);
+    const ok = await login(op.id);
+    setLoading(null);
     if (ok) navigate("/");
   };
 
@@ -45,61 +52,65 @@ export default function Login() {
             Il tuo magazzino,<br/>in ogni dettaglio.
           </h1>
           <p className="text-stone-200 text-base max-w-md leading-relaxed">
-            Materie prime, prodotti finiti, imbottigliamento e cronologia dei movimenti —
-            tutto in un unico sistema pensato per la cantina.
+            Scegli il tuo nome per iniziare. Ogni operazione sul magazzino verrà registrata a tuo nome.
           </p>
         </div>
       </div>
 
       <div className="flex items-center justify-center p-8 bg-stone-50">
-        <form onSubmit={onSubmit} className="w-full max-w-md space-y-6" data-testid="login-form">
+        <div className="w-full max-w-md space-y-6" data-testid="login-form">
           <div>
-            <div className="font-serif-display text-3xl text-stone-900 mb-1">Accesso Operatore</div>
-            <div className="text-sm text-stone-500">Inserisci le tue credenziali per continuare.</div>
+            <div className="font-serif-display text-3xl text-stone-900 mb-1">Chi sei?</div>
+            <div className="text-sm text-stone-500">Seleziona il tuo nome per accedere.</div>
           </div>
 
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="email" className="text-stone-700">Email</Label>
-              <Input
-                id="email" type="email" required
-                value={email} onChange={(e) => setEmail(e.target.value)}
-                data-testid="login-email-input"
-                className="h-11 mt-1.5"
-                placeholder="nome@tenutabarbon.it"
-              />
-            </div>
-            <div>
-              <Label htmlFor="password" className="text-stone-700">Password</Label>
-              <Input
-                id="password" type="password" required
-                value={password} onChange={(e) => setPassword(e.target.value)}
-                data-testid="login-password-input"
-                className="h-11 mt-1.5"
-                placeholder="••••••••"
-              />
-            </div>
+          <div className="space-y-3">
+            {operators.length === 0 && (
+              <div className="text-sm text-stone-500 py-10 text-center border border-dashed border-stone-300 rounded-md">
+                Nessun operatore configurato.
+              </div>
+            )}
+            {operators.map((op) => {
+              const isAdmin = op.role === "admin";
+              return (
+                <button
+                  key={op.id}
+                  onClick={() => choose(op)}
+                  disabled={loading !== null}
+                  data-testid={`login-operator-${op.id}`}
+                  className={`w-full flex items-center gap-4 px-4 py-4 rounded-lg border transition-all text-left ${
+                    isAdmin
+                      ? "border-[#6B1D2F]/30 bg-white hover:bg-[#6B1D2F]/5 hover:border-[#6B1D2F]"
+                      : "border-stone-200 bg-white hover:bg-stone-100 hover:border-stone-400"
+                  } ${loading === op.id ? "opacity-60" : ""}`}
+                >
+                  <div className={`w-11 h-11 rounded-md flex items-center justify-center ${
+                    isAdmin ? "bg-[#6B1D2F] text-white" : "bg-stone-800 text-white"
+                  }`}>
+                    {isAdmin ? <Briefcase className="w-5 h-5" /> : <Hammer className="w-5 h-5" />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-stone-900">{op.name}</div>
+                    <div className="text-xs text-stone-500">
+                      {isAdmin ? "Ufficio — può modificare e annullare" : "Operatore — registra operazioni"}
+                    </div>
+                  </div>
+                  {loading === op.id && <span className="text-xs text-stone-500">Accesso…</span>}
+                </button>
+              );
+            })}
           </div>
 
           {error && (
-            <div
-              data-testid="login-error"
-              className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"
-            >{error}</div>
+            <div data-testid="login-error" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+              {error}
+            </div>
           )}
 
-          <Button
-            type="submit" disabled={loading}
-            data-testid="login-submit-button"
-            className="w-full h-11 btn-wine"
-          >
-            {loading ? "Accesso in corso…" : "Accedi"}
-          </Button>
-
           <div className="text-xs text-stone-500 border-t border-stone-200 pt-4">
-            Prima volta?  Credenziali admin fornite via mail. Gli operatori possono essere creati dall&apos;amministratore nella sezione Operatori.
+            Nuovo operatore? L&apos;Ufficio può aggiungerlo dalla sezione Operatori dopo l&apos;accesso.
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

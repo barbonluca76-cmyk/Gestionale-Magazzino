@@ -87,12 +87,9 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 # ---------- Models ----------
 class LoginIn(BaseModel):
-    email: EmailStr
-    password: str
+    operator_id: str
 
 class OperatorIn(BaseModel):
-    email: EmailStr
-    password: str
     name: str
     role: Literal["admin", "operator"] = "operator"
 
@@ -187,13 +184,29 @@ async def log_movement(
     await db.movements.insert_one(doc)
 
 # ---------- Auth routes ----------
+@api.get("/auth/operators-list")
+async def operators_list_public():
+    """Public: used by the login screen to list selectable operators."""
+    cur = db.users.find({}).sort("name", 1)
+    out = []
+    async for u in cur:
+        out.append({
+            "id": str(u["_id"]),
+            "name": u.get("name") or u.get("email") or "Operatore",
+            "role": u.get("role", "operator"),
+        })
+    return out
+
 @api.post("/auth/login")
 async def login(data: LoginIn, response: Response):
-    email = data.email.lower()
-    user = await db.users.find_one({"email": email})
-    if not user or not verify_password(data.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Credenziali non valide")
+    try:
+        user = await db.users.find_one({"_id": ObjectId(data.operator_id)})
+    except Exception:
+        user = None
+    if not user:
+        raise HTTPException(status_code=401, detail="Operatore non trovato")
     uid = str(user["_id"])
+    email = user.get("email", "")
     token = create_access_token(uid, email)
     response.set_cookie(
         "access_token", token, httponly=True, secure=True, samesite="none",
@@ -227,18 +240,13 @@ async def list_operators(_: dict = Depends(get_current_user)):
 
 @api.post("/auth/operators")
 async def create_operator(data: OperatorIn, admin: dict = Depends(require_admin)):
-    email = data.email.lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email già registrata")
     doc = {
-        "email": email,
-        "password_hash": hash_password(data.password),
         "name": data.name,
         "role": data.role,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     r = await db.users.insert_one(doc)
-    return {"id": str(r.inserted_id), "email": email, "name": data.name, "role": data.role}
+    return {"id": str(r.inserted_id), "name": data.name, "role": data.role}
 
 @api.delete("/auth/operators/{op_id}")
 async def delete_operator(op_id: str, admin: dict = Depends(require_admin)):
@@ -561,6 +569,51 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
     )
     return record
 
+@api.delete("/bottling/{bid}")
+async def delete_bottling(bid: str, admin: dict = Depends(require_admin)):
+    """Admin-only: annulla un imbottigliamento e ripristina il magazzino."""
+    doc = await db.bottling_records.find_one({"_id": oid(bid)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Record non trovato")
+
+    # Reverse finished item credit
+    if doc.get("finished_item_id") and doc.get("bottle_count"):
+        try:
+            await db.finished_items.update_one(
+                {"_id": oid(doc["finished_item_id"])},
+                {"$inc": {"quantity": -int(doc["bottle_count"])}}
+            )
+        except Exception:
+            pass
+
+    # Reverse raw material deductions (only those that were actually deducted)
+    for m in doc.get("materials", []) or []:
+        if m.get("not_deducted"):
+            continue
+        try:
+            await db.raw_items.update_one(
+                {"_id": oid(m["raw_item_id"])},
+                {"$inc": {"quantity": float(m.get("quantity", 0))}}
+            )
+        except Exception:
+            pass
+
+    await db.bottling_records.delete_one({"_id": oid(bid)})
+
+    await log_movement(
+        admin, "bottling_reversal", "bottling", bid, doc.get("wine_name", ""),
+        -int(doc.get("bottle_count", 0) or 0),
+        "Annullamento imbottigliamento — magazzino ripristinato",
+        extra={
+            "original_bottling_id": bid,
+            "original_operator": doc.get("operator_name", ""),
+            "bottle_count": doc.get("bottle_count"),
+            "supplier": doc.get("supplier"),
+            "materials": doc.get("materials", []),
+        },
+    )
+    return {"ok": True}
+
 @api.get("/bottling/{bid}/pdf")
 async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):
     doc = await db.bottling_records.find_one({"_id": oid(bid)})
@@ -685,19 +738,17 @@ async def list_movements(
 
 # ---------- Startup: indexes, admin seed, demo data ----------
 async def seed_admin():
-    email = os.environ["ADMIN_EMAIL"].lower()
-    pw = os.environ["ADMIN_PASSWORD"]
-    existing = await db.users.find_one({"email": email})
-    if not existing:
-        await db.users.insert_one({
-            "email": email,
-            "password_hash": hash_password(pw),
-            "name": "Luca Barbon",
-            "role": "admin",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-    elif not verify_password(pw, existing["password_hash"]):
-        await db.users.update_one({"email": email}, {"$set": {"password_hash": hash_password(pw)}})
+    """Seeds a default admin (Ufficio) + a default operator (Cantina) if the DB is empty."""
+    if await db.users.count_documents({}) > 0:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    admin_name = os.environ.get("ADMIN_NAME", "Ufficio — Luca Barbon")
+    operator_name = os.environ.get("OPERATOR_NAME", "Cantina")
+    await db.users.insert_many([
+        {"name": admin_name, "role": "admin", "created_at": now,
+         "email": os.environ.get("ADMIN_EMAIL", "")},
+        {"name": operator_name, "role": "operator", "created_at": now, "email": ""},
+    ])
 
 async def seed_demo():
     if await db.groups.count_documents({}) > 0:
@@ -773,7 +824,6 @@ async def seed_demo():
 
 @app.on_event("startup")
 async def startup():
-    await db.users.create_index("email", unique=True)
     await db.movements.create_index([("created_at", -1)])
     await db.bottling_records.create_index([("created_at", -1)])
     await seed_admin()

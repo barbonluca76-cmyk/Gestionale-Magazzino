@@ -4,7 +4,7 @@ import { api, formatApiError } from "@/lib/api";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null); // null=loading, false=anon, obj=auth
+  const [user, setUser] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -21,10 +21,10 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (operator_id) => {
     setError("");
     try {
-      const { data } = await api.post("/auth/login", { email, password });
+      const { data } = await api.post("/auth/login", { operator_id });
       localStorage.setItem("tb_token", data.token);
       setUser(data.user);
       return true;

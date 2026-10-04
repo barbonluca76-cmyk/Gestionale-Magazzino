@@ -6,17 +6,21 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, History } from "lucide-react";
+import { Download, History, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 
 const KIND_LABELS = {
   stock_adjust: "Rettifica",
   bottling: "Imbottigliamento",
+  bottling_reversal: "Annullamento",
   item_create: "Creazione",
   item_delete: "Eliminazione",
 };
 
 export default function Cronologia() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [movs, setMovs] = useState([]);
   const [operators, setOperators] = useState([]);
   const [filters, setFilters] = useState({ operator_id: "all", kind: "all", search: "" });
@@ -56,6 +60,15 @@ export default function Cronologia() {
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
+  const cancelBottling = async (bid) => {
+    if (!window.confirm("Annullare questo imbottigliamento? Il magazzino verrà ripristinato (bottiglie sottratte, materiali riaggiunti).")) return;
+    try {
+      await api.delete(`/bottling/${bid}`);
+      toast.success("Imbottigliamento annullato — magazzino ripristinato");
+      load();
+    } catch (e) { toast.error(formatApiError(e)); }
+  };
+
   return (
     <div className="space-y-6" data-testid="cronologia-root">
       <div>
@@ -83,6 +96,7 @@ export default function Cronologia() {
               <SelectContent>
                 <SelectItem value="all">Tutti i tipi</SelectItem>
                 <SelectItem value="bottling">Imbottigliamento</SelectItem>
+                <SelectItem value="bottling_reversal">Annullamento</SelectItem>
                 <SelectItem value="stock_adjust">Rettifica</SelectItem>
                 <SelectItem value="item_create">Creazione</SelectItem>
                 <SelectItem value="item_delete">Eliminazione</SelectItem>
@@ -104,7 +118,7 @@ export default function Cronologia() {
                 <TableHead>Articolo / Lotto</TableHead>
                 <TableHead className="text-right">Variazione</TableHead>
                 <TableHead>Motivo</TableHead>
-                <TableHead className="text-right">PDF</TableHead>
+                <TableHead className="text-right">Azioni</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -112,18 +126,37 @@ export default function Cronologia() {
                 <TableRow key={m.id} data-testid={`mov-row-${m.id}`}>
                   <TableCell className="font-mono-num text-xs">{new Date(m.created_at).toLocaleString("it-IT")}</TableCell>
                   <TableCell>{m.operator_name}</TableCell>
-                  <TableCell><Badge className="bg-stone-100 text-stone-700 border">{KIND_LABELS[m.kind] || m.kind}</Badge></TableCell>
+                  <TableCell><Badge className={
+                    m.kind === "bottling_reversal" ? "bg-red-50 text-red-700 border border-red-200" :
+                    m.kind === "bottling" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+                    "bg-stone-100 text-stone-700 border"
+                  }>{KIND_LABELS[m.kind] || m.kind}</Badge></TableCell>
                   <TableCell>{m.item_name}</TableCell>
                   <TableCell className={`text-right font-mono-num ${m.quantity_delta < 0 ? "text-red-700" : m.quantity_delta > 0 ? "text-emerald-700" : "text-stone-500"}`}>
                     {m.quantity_delta > 0 ? "+" : ""}{m.quantity_delta}
                   </TableCell>
                   <TableCell className="text-sm text-stone-600">{m.reason}</TableCell>
                   <TableCell className="text-right">
-                    {m.kind === "bottling" && m.extra?.bottling_id && (
-                      <Button variant="outline" size="sm" onClick={() => downloadPdf(m.extra.bottling_id)} data-testid={`download-pdf-${m.extra.bottling_id}`}>
-                        <Download className="w-3 h-3" />
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {m.kind === "bottling" && m.extra?.bottling_id && (
+                        <>
+                          <Button variant="outline" size="sm" onClick={() => downloadPdf(m.extra.bottling_id)} data-testid={`download-pdf-${m.extra.bottling_id}`} title="Scarica PDF">
+                            <Download className="w-3 h-3" />
+                          </Button>
+                          {isAdmin && (
+                            <Button
+                              variant="outline" size="sm"
+                              onClick={() => cancelBottling(m.extra.bottling_id)}
+                              data-testid={`cancel-bottling-${m.extra.bottling_id}`}
+                              className="border-red-200 text-red-700 hover:bg-red-50"
+                              title="Annulla imbottigliamento (solo Ufficio)"
+                            >
+                              <XCircle className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
