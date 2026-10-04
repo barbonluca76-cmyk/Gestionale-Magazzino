@@ -1,0 +1,29 @@
+{
+  "summary": "Retest after serialization fix: all 4 POST create endpoints (groups, raw-items, finished-items, bottling) return 200 with 'id' and no ObjectId leak. Bottling business logic validated end-to-end: tenuta_barbon decrements raw stock, cliente marks materials not_deducted and preserves raw stock, finished item incremented by bottle_count in both cases, new_lot_name creates a lot with correct quantity. PDF endpoint returns application/pdf starting with %PDF. Movements log includes extra.bottling_id. Dashboard summary reflects updated totals. 9/9 pytest tests pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "CORS middleware", "issue": "allow_credentials=False but login sets httpOnly cookies with SameSite=none — browser clients relying on cookies cross-origin will not have credentials delivered. Bearer-token fallback currently used by frontend, so works, but inconsistent."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_bottling_flow.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "serialize() helper exists but create endpoints manually pop _id and set id — consider using serialize(doc) consistently for DRY.",
+    "CORS: allow_credentials=False combined with cookie-based auth (samesite=none, secure=true) is inconsistent; frontend relies on Bearer header only. Either enable credentials with explicit origins or drop cookie setting.",
+    "oid() raises 400 but create_bottling calls oid() on user-provided raw_item_id inside a loop; a single bad id aborts the whole bottling instead of being skipped. Consider try/except per material.",
+    "No transactional guarantee: if finished-item $inc succeeds but raw $inc fails, state is inconsistent. Acceptable for MVP but should be documented."
+  ],
+  "updated_files": ["/app/backend/tests/test_bottling_flow.py"],
+  "success_rate": {"backend": "100%", "frontend": "n/a (backend-only testing)"},
+  "test_credentials": "barbonluca76@gmail.com / Barbon2026! (admin)",
+  "seed_data_creation": "Created TEST_raw_grp, TEST_fin_grp groups, TEST_bottle_075 raw item, TEST_lot_A + TEST_new_lot_Z finished items, and 3 bottling records (not cleaned up — low volume, prefixed TEST_).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Serialization bug fully fixed. Reusable regression suite at /app/backend/tests/test_bottling_flow.py covers all POST endpoints + bottling supplier branches + PDF + movements + dashboard. Admin credentials in /app/memory/test_credentials.md.",
+  "rca of the issue": "Previous iteration: create_group/raw/finished/bottling spread the inserted doc back into the response dict which still held BSON ObjectId under _id, causing FastAPI JSON encoding to fail. Fix applied: doc.pop('_id', None); doc['id']=str(r.inserted_id) before return. Verified by asserting '_id' absent and 'id' present on all four endpoints."
+}
