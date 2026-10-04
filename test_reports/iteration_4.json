@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only verification of (a) new password-less login via operator-id select, (b) admin-only operator CRUD, (c) new admin-only DELETE /api/bottling/{id} that reverses inventory. 12/12 tests pass sequentially. All review-request scenarios verified: operators-list public with seeded Ufficio+Cantina, login OK, invalid id => 401, /auth/me via Bearer OK, POST /auth/operators forbidden to non-admin (403) and OK for admin with {name,role} only, DELETE /auth/operators/{self} => 400, DELETE /bottling admin reverses finished + raw (tenuta_barbon), DELETE /bottling admin only reverses finished (cliente), DELETE /bottling non-admin => 403 with no inventory change, bottling_reversal movement logged with extra.original_bottling_id, regression on /scan/{code}, POST /bottling, PDF generation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/auth/operators/{id}", "issue": "Prevents self-delete but does not prevent deleting the last remaining admin (could lock the system out)."},
+      {"endpoint": "POST /api/auth/login", "issue": "Sets cookie with samesite='none' and secure=True unconditionally; fine for prod HTTPS but breaks local-HTTP cookie flows (Bearer works)."},
+      {"endpoint": "DELETE /api/bottling/{id}", "issue": "Reversal is non-atomic: if finished_items update succeeds but a raw_items $inc fails, state is partially restored and record is still deleted (try/except swallows errors silently)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_auth_bottling_cancel.py",
+    "/app/test_reports/pytest/auth_bottling_cancel_results.xml"
+  ],
+  "action_items": [
+    "Consider rejecting deletion of the last admin user to avoid system lockout.",
+    "Guard raw-material reversal against pushing stock into unexpected state and surface errors instead of silently try/except pass.",
+    "Known test caveat: when running pytest -n auto, parallel workers can collide on the same seeded Cabernet lot (race in quantity assertions); run with -n 0 or use unique lots per worker."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~850 lines; split into routers (auth/items/bottling/scan) for maintainability.",
+    "log_movement reads operator['email']; seeded Cantina operator has email='' which is fine, but any custom-created operator (POST /auth/operators) has NO email key at all — log_movement will KeyError on operator['email']. Repro: create new operator via admin, log in as them, perform any item_create/bottling: server will 500. (Not covered by current review items because tests login only as seeded users, but this is a latent bug introduced by the password-less OperatorIn that omits email.)",
+    "create_bottling uses user.get('name', user['email']) — same KeyError risk if 'email' absent on newly-created operators.",
+    "DELETE /bottling: no idempotency / audit of partial failures; wrap in try/except at the operation level and record failures in the movement 'extra'.",
+    "No rate-limiting / replay protection on /auth/login with operator_id — anyone with a valid ObjectId can mint a 12h token (acceptable for internal LAN tool, flag for public deployment)."
+  ],
+  "updated_files": ["/app/backend/tests/test_auth_bottling_cancel.py"],
+  "success_rate": {"backend": "100% (12/12 sequential)", "frontend": "not tested (backend-only)"},
+  "test_credentials": "Login model is now {operator_id}. Pick admin from GET /api/auth/operators-list where role=='admin' (Ufficio — Luca Barbon) and operator Cantina.",
+  "seed_data_creation": "Tests create/delete a TEST_ operator and a few bottling records on seeded Cabernet Riserva 2022 — Lotto A; all cancelled/cleaned up at the end. Net inventory delta ~0.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Use /app/backend/tests/test_auth_bottling_cancel.py as the regression file. Run with `-n 0` to avoid xdist races on shared seeded lot. Latent bug: operators created via POST /api/auth/operators have no 'email' field; log_movement/create_bottling will raise KeyError when such a user acts. Consider patching log_movement to use operator.get('email','').",
+  "rca of the issue": "N/A — all reviewed features work. The one intermittent parallel failure is a test-side race, not a product bug: two xdist workers both bottling the same lot invalidated the 'before+10' snapshot assertion. Running sequentially (-n 0) yields 12/12 green."
+}

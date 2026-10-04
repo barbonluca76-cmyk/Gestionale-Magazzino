@@ -171,8 +171,8 @@ async def log_movement(
     doc = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "operator_id": operator["id"],
-        "operator_name": operator.get("name", operator["email"]),
-        "operator_email": operator["email"],
+        "operator_name": operator.get("name") or operator.get("email") or "Operatore",
+        "operator_email": operator.get("email", ""),
         "kind": kind,                   # 'stock_adjust', 'bottling', 'item_create', 'item_delete'
         "item_kind": item_kind,         # 'raw', 'finished', 'bottling'
         "item_id": item_id,
@@ -537,7 +537,7 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
     record = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "operator_id": user["id"],
-        "operator_name": user.get("name", user["email"]),
+        "operator_name": user.get("name") or user.get("email") or "Operatore",
         "supplier": data.supplier,
         "client_name": data.client_name or "",
         "wine_name": finished_name,
