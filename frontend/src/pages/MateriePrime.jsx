@@ -264,7 +264,22 @@ export default function MateriePrime() {
               </div>
             </div>
             <div><Label>Codice (barcode/QR)</Label>
-              <Input value={itemForm.barcode} onChange={(e) => setItemForm({ ...itemForm, barcode: e.target.value })} data-testid="raw-item-barcode" placeholder="Es. BOT-075-VERDE" />
+              <Input
+                value={itemForm.barcode}
+                onChange={(e) => setItemForm({ ...itemForm, barcode: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                onPaste={(e) => {
+                  const txt = (e.clipboardData.getData("text") || "").replace(/[\r\n]+/g, "").trim();
+                  e.preventDefault();
+                  setItemForm({ ...itemForm, barcode: txt });
+                }}
+                data-testid="raw-item-barcode"
+                placeholder="Scansiona o inserisci (es. 8001234567890)"
+                autoComplete="off"
+              />
+              <div className="text-[11px] text-stone-500 mt-1">
+                Clicca nel campo e scansiona il codice a barre col lettore: verrà inserito automaticamente. Il codice deve essere univoco.
+              </div>
             </div>
             <div><Label>Note</Label>
               <Textarea value={itemForm.notes} onChange={(e) => setItemForm({ ...itemForm, notes: e.target.value })} />

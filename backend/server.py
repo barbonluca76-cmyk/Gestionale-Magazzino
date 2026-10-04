@@ -318,6 +318,8 @@ async def list_raw(group_id: Optional[str] = None, _: dict = Depends(get_current
 @api.post("/raw-items")
 async def create_raw(data: RawItemIn, user: dict = Depends(get_current_user)):
     doc = data.model_dump()
+    doc["barcode"] = _norm_barcode(doc.get("barcode"))
+    await _check_barcode_unique("raw_items", doc["barcode"])
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.raw_items.insert_one(doc)
     doc.pop("_id", None)
@@ -329,6 +331,8 @@ async def create_raw(data: RawItemIn, user: dict = Depends(get_current_user)):
 @api.put("/raw-items/{iid}")
 async def update_raw(iid: str, data: RawItemIn, user: dict = Depends(get_current_user)):
     update = data.model_dump()
+    update["barcode"] = _norm_barcode(update.get("barcode"))
+    await _check_barcode_unique("raw_items", update["barcode"], exclude_id=iid)
     r = await db.raw_items.update_one({"_id": oid(iid)}, {"$set": update})
     if not r.matched_count:
         raise HTTPException(status_code=404, detail="Articolo non trovato")
@@ -371,6 +375,8 @@ async def list_finished(group_id: Optional[str] = None, _: dict = Depends(get_cu
 @api.post("/finished-items")
 async def create_finished(data: FinishedItemIn, user: dict = Depends(get_current_user)):
     doc = data.model_dump()
+    doc["barcode"] = _norm_barcode(doc.get("barcode"))
+    await _check_barcode_unique("finished_items", doc["barcode"])
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.finished_items.insert_one(doc)
     doc.pop("_id", None)
@@ -381,7 +387,10 @@ async def create_finished(data: FinishedItemIn, user: dict = Depends(get_current
 
 @api.put("/finished-items/{iid}")
 async def update_finished(iid: str, data: FinishedItemIn, user: dict = Depends(get_current_user)):
-    r = await db.finished_items.update_one({"_id": oid(iid)}, {"$set": data.model_dump()})
+    update = data.model_dump()
+    update["barcode"] = _norm_barcode(update.get("barcode"))
+    await _check_barcode_unique("finished_items", update["barcode"], exclude_id=iid)
+    r = await db.finished_items.update_one({"_id": oid(iid)}, {"$set": update})
     if not r.matched_count:
         raise HTTPException(status_code=404, detail="Lotto non trovato")
     doc = await db.finished_items.find_one({"_id": oid(iid)})
@@ -408,10 +417,30 @@ async def delete_finished(iid: str, user: dict = Depends(get_current_user)):
     await log_movement(user, "item_delete", "finished", iid, doc["name"], 0, "Eliminazione lotto")
     return {"ok": True}
 
+def _norm_barcode(s: Optional[str]) -> str:
+    if not s:
+        return ""
+    return s.strip().replace("\r", "").replace("\n", "")
+
+async def _check_barcode_unique(collection: str, barcode: str, exclude_id: Optional[str] = None):
+    if not barcode:
+        return
+    q = {"barcode": barcode}
+    if exclude_id:
+        q["_id"] = {"$ne": ObjectId(exclude_id)}
+    for coll in ("raw_items", "finished_items"):
+        existing = await db[coll].find_one({**q})
+        if existing and str(existing["_id"]) != (exclude_id or ""):
+            name = existing.get("name", "")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Codice '{barcode}' già usato dall'articolo '{name}'. Il codice deve essere univoco."
+            )
+
 # ---------- Scan by barcode ----------
 @api.get("/scan/{code}")
 async def scan_lookup(code: str, _: dict = Depends(get_current_user)):
-    code = code.strip()
+    code = _norm_barcode(code)
     if not code:
         raise HTTPException(status_code=400, detail="Codice vuoto")
     raw = await db.raw_items.find_one({"barcode": code})
@@ -426,7 +455,9 @@ async def scan_lookup(code: str, _: dict = Depends(get_current_user)):
 
 @api.post("/scan/adjust")
 async def scan_adjust(data: ScanAdjustIn, user: dict = Depends(get_current_user)):
-    code = data.code.strip()
+    code = _norm_barcode(data.code)
+    if not code:
+        raise HTTPException(status_code=400, detail="Codice vuoto")
     raw = await db.raw_items.find_one({"barcode": code})
     if raw:
         new_q = (raw.get("quantity") or 0) + data.quantity_delta
@@ -1102,6 +1133,19 @@ async def seed_demo():
 async def startup():
     await db.movements.create_index([("created_at", -1)])
     await db.bottling_records.create_index([("created_at", -1)])
+    try:
+        await db.raw_items.create_index(
+            "barcode", unique=True,
+            partialFilterExpression={"barcode": {"$type": "string", "$gt": ""}},
+            name="barcode_unique_nonempty",
+        )
+        await db.finished_items.create_index(
+            "barcode", unique=True,
+            partialFilterExpression={"barcode": {"$type": "string", "$gt": ""}},
+            name="barcode_unique_nonempty",
+        )
+    except Exception:
+        pass
     await seed_admin()
     await seed_demo()
 
