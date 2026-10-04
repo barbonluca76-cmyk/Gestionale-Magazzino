@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, formatApiError, API } from "@/lib/api";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, formatApiError } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,16 +11,21 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { FileText, Info, Download, Plus } from "lucide-react";
+import { FileText, Info, Download, Plus, Pencil } from "lucide-react";
 
 const CAPACITIES = [0.20, 0.35, 0.50, 0.75, 1.50, 3.00];
 const CARTON_SIZES = [6, 12, 24];
 
 export default function Imbottigliamento() {
+  const { id: editId } = useParams();
+  const navigate = useNavigate();
+  const isEdit = Boolean(editId);
+
   const [rawGroups, setRawGroups] = useState([]);
   const [rawItems, setRawItems] = useState([]);
   const [finGroups, setFinGroups] = useState([]);
   const [finItems, setFinItems] = useState([]);
+  const [editMeta, setEditMeta] = useState(null); // { operator_name, created_at }
 
   const [form, setForm] = useState({
     supplier: "tenuta_barbon",
@@ -46,9 +52,31 @@ export default function Imbottigliamento() {
           api.get("/finished-items"),
         ]);
         setRawGroups(a.data); setRawItems(b.data); setFinGroups(c.data); setFinItems(d.data);
+
+        if (editId) {
+          const { data: rec } = await api.get(`/bottling/${editId}`);
+          setEditMeta({ operator_name: rec.operator_name, created_at: rec.created_at, edited_by: rec.edited_by, edited_at: rec.edited_at });
+          setForm({
+            supplier: rec.supplier,
+            client_name: rec.client_name || "",
+            wine_name: rec.wine_name || "",
+            finished_item_id: rec.finished_item_id || "__new__",
+            new_lot_name: "",
+            finished_group_id: "",
+            bottle_count: rec.bottle_count,
+            bottle_capacity_l: String(rec.bottle_capacity_l),
+            carton_size: String(rec.carton_size),
+            carton_count: rec.carton_count,
+            notes: rec.notes || "",
+          });
+          const mats = {};
+          (rec.materials || []).forEach((m) => { mats[m.raw_item_id] = m.quantity; });
+          setMaterials(mats);
+        }
       } catch (e) { toast.error(formatApiError(e)); }
     })();
-  }, []);
+    // eslint-disable-next-line
+  }, [editId]);
 
   // Automatic HL calc
   const hl = useMemo(() => (Number(form.bottle_count) * Number(form.bottle_capacity_l)) / 100, [form.bottle_count, form.bottle_capacity_l]);
@@ -109,19 +137,33 @@ export default function Imbottigliamento() {
         materials: mats,
         notes: form.notes,
       };
-      const { data } = await api.post("/bottling", payload);
-      toast.success("Imbottigliamento registrato");
+
+      let recordId;
+      if (isEdit) {
+        const { data } = await api.put(`/bottling/${editId}`, payload);
+        recordId = data.id;
+        toast.success("Imbottigliamento modificato — magazzino aggiornato");
+      } else {
+        const { data } = await api.post("/bottling", payload);
+        recordId = data.id;
+        toast.success("Imbottigliamento registrato");
+      }
+
       // Download PDF
       try {
-        const resp = await api.get(`/bottling/${data.id}/pdf`, { responseType: "blob" });
+        const resp = await api.get(`/bottling/${recordId}/pdf`, { responseType: "blob" });
         const url = URL.createObjectURL(new Blob([resp.data], { type: "application/pdf" }));
         const a = document.createElement("a");
-        a.href = url; a.download = `imbottigliamento_${data.id}.pdf`;
+        a.href = url; a.download = `imbottigliamento_${recordId}.pdf`;
         a.click(); URL.revokeObjectURL(url);
       } catch (_e) { /* ignore */ }
-      // Reset
-      setMaterials({});
-      setForm((f) => ({ ...f, wine_name: "", new_lot_name: "", bottle_count: 1200, notes: "" }));
+
+      if (isEdit) {
+        navigate("/cronologia");
+      } else {
+        setMaterials({});
+        setForm((f) => ({ ...f, wine_name: "", new_lot_name: "", bottle_count: 1200, notes: "" }));
+      }
     } catch (e) { toast.error(formatApiError(e)); }
   };
 
@@ -141,8 +183,22 @@ export default function Imbottigliamento() {
     <div className="space-y-6" data-testid="bottling-root">
       <div>
         <div className="text-xs uppercase tracking-[0.2em] text-stone-500 mb-1">Produzione</div>
-        <h1 className="font-serif-display text-4xl text-stone-900">Modulo imbottigliamento</h1>
-        <p className="text-stone-500 mt-2">Compila i dati del lotto. Ettolitri e cartoni sono calcolati automaticamente.</p>
+        <h1 className="font-serif-display text-4xl text-stone-900 flex items-center gap-3">
+          {isEdit && <Pencil className="w-7 h-7 text-amber-600" />}
+          {isEdit ? "Modifica imbottigliamento" : "Modulo imbottigliamento"}
+        </h1>
+        <p className="text-stone-500 mt-2">
+          {isEdit
+            ? "Correggi i dati del lotto. Al salvataggio il magazzino verrà prima ripristinato e poi aggiornato con i nuovi valori."
+            : "Compila i dati del lotto. Ettolitri e cartoni sono calcolati automaticamente."}
+        </p>
+        {isEdit && editMeta && (
+          <div className="mt-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-md px-4 py-2 text-sm inline-flex items-center gap-2">
+            <Info className="w-4 h-4" />
+            Modifica di un modulo registrato da <b>{editMeta.operator_name}</b> il {new Date(editMeta.created_at).toLocaleString("it-IT")}
+            {editMeta.edited_at && <span>· già modificato il {new Date(editMeta.edited_at).toLocaleString("it-IT")} da {editMeta.edited_by}</span>}
+          </div>
+        )}
       </div>
 
       {/* Supplier */}
@@ -337,7 +393,7 @@ export default function Imbottigliamento() {
           <div className="flex items-center justify-between">
             <div className="text-xs text-stone-500">Al salvataggio verrà generato automaticamente il PDF riepilogativo.</div>
             <Button className="btn-wine h-11 px-6" onClick={submit} data-testid="bottling-submit-button">
-              <FileText className="w-4 h-4 mr-2" /> Salva imbottigliamento
+              <FileText className="w-4 h-4 mr-2" /> {isEdit ? "Salva modifiche" : "Salva imbottigliamento"}
             </Button>
           </div>
         </CardContent>

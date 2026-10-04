@@ -24,6 +24,8 @@ export default function Operatori() {
   };
   useEffect(() => { load(); }, []);
 
+  const hasAdmin = list.some((o) => o.role === "admin");
+
   const save = async () => {
     if (!form.name.trim()) { toast.error("Inserisci un nome"); return; }
     try {
@@ -118,9 +120,14 @@ export default function Operatori() {
                 <SelectTrigger data-testid="op-role-select"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="operator">Operatore (registra operazioni)</SelectItem>
-                  <SelectItem value="admin">Ufficio / Admin (può modificare e annullare)</SelectItem>
+                  <SelectItem value="admin" disabled={hasAdmin}>
+                    Ufficio / Admin (può modificare e annullare){hasAdmin ? " — già esistente" : ""}
+                  </SelectItem>
                 </SelectContent>
               </Select>
+              {hasAdmin && (
+                <div className="text-[11px] text-stone-500 mt-1">È ammesso un solo Ufficio. Per cambiarlo, elimina prima quello esistente.</div>
+              )}
             </div>
             <div className="text-xs text-stone-500 bg-stone-50 border border-stone-200 rounded-md p-3">
               Il nome inserito comparirà nella schermata di accesso e verrà registrato in cronologia per ogni operazione svolta.

@@ -38,6 +38,7 @@ function App() {
               <Route path="/materie-prime" element={<MateriePrime />} />
               <Route path="/prodotti-finiti" element={<ProdottiFiniti />} />
               <Route path="/imbottigliamento" element={<Imbottigliamento />} />
+              <Route path="/imbottigliamento/:id" element={<Imbottigliamento />} />
               <Route path="/scansione" element={<Scansione />} />
               <Route path="/cronologia" element={<Cronologia />} />
               <Route path="/operatori" element={<Operatori />} />

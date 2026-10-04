@@ -240,6 +240,9 @@ async def list_operators(_: dict = Depends(get_current_user)):
 
 @api.post("/auth/operators")
 async def create_operator(data: OperatorIn, admin: dict = Depends(require_admin)):
+    if data.role == "admin":
+        if await db.users.count_documents({"role": "admin"}) > 0:
+            raise HTTPException(status_code=400, detail="Esiste già un operatore Ufficio (admin). Può essercene uno solo.")
     doc = {
         "name": data.name,
         "role": data.role,
@@ -252,6 +255,11 @@ async def create_operator(data: OperatorIn, admin: dict = Depends(require_admin)
 async def delete_operator(op_id: str, admin: dict = Depends(require_admin)):
     if op_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Non puoi eliminare te stesso")
+    target = await db.users.find_one({"_id": oid(op_id)})
+    if target and target.get("role") == "admin":
+        count = await db.users.count_documents({"role": "admin"})
+        if count <= 1:
+            raise HTTPException(status_code=400, detail="Impossibile eliminare l'unico Ufficio (admin).")
     r = await db.users.delete_one({"_id": oid(op_id)})
     if not r.deleted_count:
         raise HTTPException(status_code=404, detail="Operatore non trovato")
@@ -576,28 +584,7 @@ async def delete_bottling(bid: str, admin: dict = Depends(require_admin)):
     if not doc:
         raise HTTPException(status_code=404, detail="Record non trovato")
 
-    # Reverse finished item credit
-    if doc.get("finished_item_id") and doc.get("bottle_count"):
-        try:
-            await db.finished_items.update_one(
-                {"_id": oid(doc["finished_item_id"])},
-                {"$inc": {"quantity": -int(doc["bottle_count"])}}
-            )
-        except Exception:
-            pass
-
-    # Reverse raw material deductions (only those that were actually deducted)
-    for m in doc.get("materials", []) or []:
-        if m.get("not_deducted"):
-            continue
-        try:
-            await db.raw_items.update_one(
-                {"_id": oid(m["raw_item_id"])},
-                {"$inc": {"quantity": float(m.get("quantity", 0))}}
-            )
-        except Exception:
-            pass
-
+    await _reverse_bottling_inventory(doc)
     await db.bottling_records.delete_one({"_id": oid(bid)})
 
     await log_movement(
@@ -613,6 +600,126 @@ async def delete_bottling(bid: str, admin: dict = Depends(require_admin)):
         },
     )
     return {"ok": True}
+
+async def _reverse_bottling_inventory(doc: dict):
+    """Reverses a bottling record's inventory impact (used by DELETE and PUT)."""
+    if doc.get("finished_item_id") and doc.get("bottle_count"):
+        try:
+            await db.finished_items.update_one(
+                {"_id": oid(doc["finished_item_id"])},
+                {"$inc": {"quantity": -int(doc["bottle_count"])}}
+            )
+        except Exception:
+            pass
+    for m in doc.get("materials", []) or []:
+        if m.get("not_deducted"):
+            continue
+        try:
+            await db.raw_items.update_one(
+                {"_id": oid(m["raw_item_id"])},
+                {"$inc": {"quantity": float(m.get("quantity", 0))}}
+            )
+        except Exception:
+            pass
+
+@api.put("/bottling/{bid}")
+async def update_bottling(bid: str, data: BottlingIn, admin: dict = Depends(require_admin)):
+    """Admin-only: corregge un modulo di imbottigliamento ripristinando e riapplicando il magazzino."""
+    doc = await db.bottling_records.find_one({"_id": oid(bid)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Record non trovato")
+
+    # 1) Reverse the old inventory impact
+    await _reverse_bottling_inventory(doc)
+
+    # 2) Resolve destination finished item (existing or new)
+    hl = round((data.bottle_count * data.bottle_capacity_l) / 100.0, 4)
+    finished_item_id = data.finished_item_id
+    finished_name = data.wine_name
+    if not finished_item_id:
+        if not (data.new_lot_name and data.finished_group_id):
+            raise HTTPException(status_code=400, detail="Specificare lotto esistente o nuovo lotto + gruppo")
+        new_doc = {
+            "group_id": data.finished_group_id,
+            "name": data.new_lot_name,
+            "quantity": 0, "unit": "bott.", "min_threshold": 0,
+            "bottle_capacity_l": data.bottle_capacity_l,
+            "notes": "Creato da imbottigliamento (modifica)",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        r = await db.finished_items.insert_one(new_doc)
+        finished_item_id = str(r.inserted_id)
+        finished_name = data.new_lot_name
+
+    # 3) Credit new finished item
+    await db.finished_items.update_one(
+        {"_id": oid(finished_item_id)},
+        {"$inc": {"quantity": data.bottle_count}}
+    )
+
+    # 4) Apply new raw-material deductions
+    materials_log = []
+    if data.supplier == "tenuta_barbon":
+        for m in data.materials:
+            if m.quantity <= 0:
+                continue
+            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
+            if not raw:
+                continue
+            await db.raw_items.update_one(
+                {"_id": oid(m.raw_item_id)},
+                {"$inc": {"quantity": -m.quantity}}
+            )
+            materials_log.append({
+                "raw_item_id": m.raw_item_id, "name": raw["name"], "quantity": m.quantity,
+            })
+    else:
+        for m in data.materials:
+            if m.quantity <= 0:
+                continue
+            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
+            materials_log.append({
+                "raw_item_id": m.raw_item_id,
+                "name": raw["name"] if raw else "",
+                "quantity": m.quantity,
+                "not_deducted": True,
+            })
+
+    # 5) Update record (preserve original operator and created_at)
+    await db.bottling_records.update_one(
+        {"_id": oid(bid)},
+        {"$set": {
+            "supplier": data.supplier,
+            "client_name": data.client_name or "",
+            "wine_name": finished_name,
+            "finished_item_id": finished_item_id,
+            "bottle_count": data.bottle_count,
+            "bottle_capacity_l": data.bottle_capacity_l,
+            "hl": hl,
+            "carton_size": data.carton_size,
+            "carton_count": data.carton_count,
+            "materials": materials_log,
+            "notes": data.notes or "",
+            "edited_at": datetime.now(timezone.utc).isoformat(),
+            "edited_by": admin.get("name", ""),
+        }}
+    )
+    updated = await db.bottling_records.find_one({"_id": oid(bid)})
+
+    # 6) Log movement
+    await log_movement(
+        admin, "bottling_edit", "bottling", bid, finished_name,
+        data.bottle_count,
+        f"Modifica imbottigliamento — {data.bottle_count} bott. × {data.bottle_capacity_l}L = {hl} HL",
+        extra={
+            "bottling_id": bid,
+            "supplier": data.supplier,
+            "deducted": data.supplier == "tenuta_barbon",
+            "materials": materials_log,
+            "original_operator": doc.get("operator_name", ""),
+        },
+    )
+    return serialize(updated)
 
 @api.get("/bottling/{bid}/pdf")
 async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):

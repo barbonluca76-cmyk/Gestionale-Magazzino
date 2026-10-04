@@ -6,20 +6,23 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Download, History, XCircle } from "lucide-react";
+import { Download, History, XCircle, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const KIND_LABELS = {
   stock_adjust: "Rettifica",
   bottling: "Imbottigliamento",
   bottling_reversal: "Annullamento",
+  bottling_edit: "Modifica",
   item_create: "Creazione",
   item_delete: "Eliminazione",
 };
 
 export default function Cronologia() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
   const [movs, setMovs] = useState([]);
   const [operators, setOperators] = useState([]);
@@ -96,6 +99,7 @@ export default function Cronologia() {
               <SelectContent>
                 <SelectItem value="all">Tutti i tipi</SelectItem>
                 <SelectItem value="bottling">Imbottigliamento</SelectItem>
+                <SelectItem value="bottling_edit">Modifica</SelectItem>
                 <SelectItem value="bottling_reversal">Annullamento</SelectItem>
                 <SelectItem value="stock_adjust">Rettifica</SelectItem>
                 <SelectItem value="item_create">Creazione</SelectItem>
@@ -144,17 +148,33 @@ export default function Cronologia() {
                             <Download className="w-3 h-3" />
                           </Button>
                           {isAdmin && (
-                            <Button
-                              variant="outline" size="sm"
-                              onClick={() => cancelBottling(m.extra.bottling_id)}
-                              data-testid={`cancel-bottling-${m.extra.bottling_id}`}
-                              className="border-red-200 text-red-700 hover:bg-red-50"
-                              title="Annulla imbottigliamento (solo Ufficio)"
-                            >
-                              <XCircle className="w-3 h-3" />
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline" size="sm"
+                                onClick={() => navigate(`/imbottigliamento/${m.extra.bottling_id}`)}
+                                data-testid={`edit-bottling-${m.extra.bottling_id}`}
+                                className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                                title="Modifica imbottigliamento (solo Ufficio)"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="outline" size="sm"
+                                onClick={() => cancelBottling(m.extra.bottling_id)}
+                                data-testid={`cancel-bottling-${m.extra.bottling_id}`}
+                                className="border-red-200 text-red-700 hover:bg-red-50"
+                                title="Annulla imbottigliamento (solo Ufficio)"
+                              >
+                                <XCircle className="w-3 h-3" />
+                              </Button>
+                            </>
                           )}
                         </>
+                      )}
+                      {m.kind === "bottling_edit" && m.extra?.bottling_id && (
+                        <Button variant="outline" size="sm" onClick={() => downloadPdf(m.extra.bottling_id)} title="Scarica PDF aggiornato">
+                          <Download className="w-3 h-3" />
+                        </Button>
                       )}
                     </div>
                   </TableCell>
