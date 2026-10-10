@@ -52,12 +52,20 @@ function SiNo({ value, onChange, name }) {
 function ComponentRow({ label, cmp, onChange, options, autoFillSupplier, showQty, autoQty, manualOnly = false }) {
   const isManual = cmp.art_id === "__manual__";
   const setK = (k, v) => onChange({ ...cmp, [k]: v });
+  // Auto-populate quantity visibly when checkbox is ticked and field is empty
+  const onToggleUsed = (v) => {
+    const next = { ...cmp, used: !!v };
+    if (v && showQty && (next.quantity === "" || next.quantity === undefined || next.quantity === null) && autoQty) {
+      next.quantity = autoQty;
+    }
+    onChange(next);
+  };
   return (
     <div className="grid md:grid-cols-[20px_140px_1fr_1fr_120px] items-start gap-3 py-2 border-b border-stone-100 last:border-0">
       <div className="pt-2">
         <Checkbox
           checked={!!cmp.used}
-          onCheckedChange={(v) => setK("used", !!v)}
+          onCheckedChange={onToggleUsed}
           data-testid={`cmp-${label}-used`}
         />
       </div>
@@ -142,9 +150,8 @@ export default function Imbottigliamento() {
     filtrazione_microporica: [], // multi
     dosatore_coadiuvante: null,
     dosaggio: "",
-    // componenti bottiglia
+    // componenti bottiglia (Tappo rimosso)
     bottiglia: { ...emptyCmp },
-    tappo: { ...emptyCmp },
     chiusura: { ...emptyCmp },
     gabbietta: { ...emptyCmp },
     capsula: { ...emptyCmp },
@@ -220,7 +227,7 @@ export default function Imbottigliamento() {
     const value = form.supplier === "tenuta_barbon" ? "Tenuta Barbon" : "";
     setFd((p) => {
       const next = { ...p, azienda: form.supplier === "tenuta_barbon" ? "Tenuta Barbon" : (form.client_name || "") };
-      ["bottiglia","tappo","chiusura","gabbietta","capsula",
+      ["bottiglia","chiusura","gabbietta","capsula",
        "etichetta_fronte","etichetta_retro","fascetta",
        "cartone","alveare","etichetta_cartone"].forEach((k) => {
         next[k] = { ...(p[k] || emptyCmp), fornita_da: value };
@@ -265,25 +272,26 @@ export default function Imbottigliamento() {
       if (!form.wine_name.trim()) { toast.error("Inserisci il nome del vino"); return; }
       if (!form.finished_group_id) { toast.error("Seleziona la tipologia (macrogruppo)"); return; }
 
-      // Build materials[] from inline rows for inventory deduction
+      // Build materials[] from inline rows for inventory deduction (per-row deduct flag by fornita_da)
       const bottles = Number(form.bottle_count);
       const cartons = Number(form.carton_count);
-      const rowsForBottles = ["bottiglia","tappo","chiusura","gabbietta","capsula",
+      const rowsForBottles = ["bottiglia","chiusura","gabbietta","capsula",
                               "etichetta_fronte","etichetta_retro","fascetta"];
       const rowsForCartons = ["cartone","alveare","etichetta_cartone"];
+      const isTenuta = (s) => (s || "").trim().toLowerCase() === "tenuta barbon";
       const materials = [];
       rowsForBottles.forEach((k) => {
         const c = fd[k];
         if (c?.used && c.art_id && c.art_id !== "__manual__") {
           const qty = Number(c.quantity) > 0 ? Number(c.quantity) : bottles;
-          materials.push({ raw_item_id: c.art_id, quantity: qty });
+          materials.push({ raw_item_id: c.art_id, quantity: qty, deduct: isTenuta(c.fornita_da) });
         }
       });
       rowsForCartons.forEach((k) => {
         const c = fd[k];
         if (c?.used && c.art_id && c.art_id !== "__manual__") {
           const qty = Number(c.quantity) > 0 ? Number(c.quantity) : cartons;
-          materials.push({ raw_item_id: c.art_id, quantity: qty });
+          materials.push({ raw_item_id: c.art_id, quantity: qty, deduct: isTenuta(c.fornita_da) });
         }
       });
 
@@ -529,8 +537,6 @@ export default function Imbottigliamento() {
         </div>
         <ComponentRow label="Bottiglia" cmp={fd.bottiglia} onChange={setCmp("bottiglia")}
           options={optBottles.length ? optBottles : optAll} autoFillSupplier={supplierIsBarbon} />
-        <ComponentRow label="Tappo" cmp={fd.tappo} onChange={setCmp("tappo")}
-          options={optTappi.length ? optTappi : optAll} autoFillSupplier={supplierIsBarbon} />
         <ComponentRow label="Chiusura" cmp={fd.chiusura} onChange={setCmp("chiusura")}
           options={optTappi.length ? optTappi : optAll} autoFillSupplier={supplierIsBarbon} />
         <ComponentRow label="Gabbietta" cmp={fd.gabbietta} onChange={setCmp("gabbietta")}

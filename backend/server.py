@@ -129,6 +129,7 @@ class StockAdjustIn(BaseModel):
 class BottlingMaterial(BaseModel):
     raw_item_id: str
     quantity: float
+    deduct: bool = True
 
 class BottlingIn(BaseModel):
     supplier: Literal["tenuta_barbon", "cliente"]
@@ -553,36 +554,27 @@ async def create_bottling(data: BottlingIn, user: dict = Depends(get_current_use
         {"$inc": {"quantity": data.bottle_count}}
     )
 
-    # 4) Decrement raw materials ONLY if supplier == tenuta_barbon
+    # 4) Decrement raw materials per-row (based on each material's `deduct` flag)
     materials_log = []
-    if data.supplier == "tenuta_barbon":
-        for m in data.materials:
-            if m.quantity <= 0:
-                continue
-            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
-            if not raw:
-                continue
+    for m in data.materials:
+        if m.quantity <= 0:
+            continue
+        raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
+        if not raw:
+            continue
+        entry = {
+            "raw_item_id": m.raw_item_id,
+            "name": raw["name"],
+            "quantity": m.quantity,
+        }
+        if m.deduct:
             await db.raw_items.update_one(
                 {"_id": oid(m.raw_item_id)},
                 {"$inc": {"quantity": -m.quantity}}
             )
-            materials_log.append({
-                "raw_item_id": m.raw_item_id,
-                "name": raw["name"],
-                "quantity": m.quantity,
-            })
-    else:
-        # Record materials but don't decrement
-        for m in data.materials:
-            if m.quantity <= 0:
-                continue
-            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
-            materials_log.append({
-                "raw_item_id": m.raw_item_id,
-                "name": raw["name"] if raw else "",
-                "quantity": m.quantity,
-                "not_deducted": True,
-            })
+        else:
+            entry["not_deducted"] = True
+        materials_log.append(entry)
 
     # 5) Save bottling record
     record = {
@@ -708,33 +700,23 @@ async def update_bottling(bid: str, data: BottlingIn, admin: dict = Depends(requ
         {"$inc": {"quantity": data.bottle_count}}
     )
 
-    # 4) Apply new raw-material deductions
+    # 4) Apply new raw-material deductions per-row
     materials_log = []
-    if data.supplier == "tenuta_barbon":
-        for m in data.materials:
-            if m.quantity <= 0:
-                continue
-            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
-            if not raw:
-                continue
+    for m in data.materials:
+        if m.quantity <= 0:
+            continue
+        raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
+        if not raw:
+            continue
+        entry = {"raw_item_id": m.raw_item_id, "name": raw["name"], "quantity": m.quantity}
+        if m.deduct:
             await db.raw_items.update_one(
                 {"_id": oid(m.raw_item_id)},
                 {"$inc": {"quantity": -m.quantity}}
             )
-            materials_log.append({
-                "raw_item_id": m.raw_item_id, "name": raw["name"], "quantity": m.quantity,
-            })
-    else:
-        for m in data.materials:
-            if m.quantity <= 0:
-                continue
-            raw = await db.raw_items.find_one({"_id": oid(m.raw_item_id)})
-            materials_log.append({
-                "raw_item_id": m.raw_item_id,
-                "name": raw["name"] if raw else "",
-                "quantity": m.quantity,
-                "not_deducted": True,
-            })
+        else:
+            entry["not_deducted"] = True
+        materials_log.append(entry)
 
     # 5) Update record (preserve original operator and created_at)
     await db.bottling_records.update_one(
@@ -904,7 +886,7 @@ async def bottling_pdf(bid: str, _: dict = Depends(get_current_user)):
         return used, art, forn, qty
 
     bot_rows = []
-    for key, label in [("bottiglia", "Bottiglia"), ("tappo", "Tappo"),
+    for key, label in [("bottiglia", "Bottiglia"),
                        ("chiusura", "Chiusura"), ("gabbietta", "Gabbietta"),
                        ("capsula", "Capsula")]:
         u, a, f_, _q = _row_text(key)
